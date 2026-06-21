@@ -1,13 +1,22 @@
 import time
+from pathlib import Path
 from typing import Dict, Any
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from school_gpt_adapter import ask_school_gpt
 
 
-app = FastAPI(title="School Web GPT Gateway")
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+app = FastAPI(title="XJGPT School Web GPT Gateway")
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 VALID_USER_KEYS = {
@@ -31,6 +40,14 @@ def estimate_tokens(text: str) -> int:
     正式系统应使用对应模型 tokenizer。
     """
     return max(1, len(text) // 2)
+
+
+@app.get("/")
+async def serve_frontend():
+    index_file = STATIC_DIR / "index.html"
+    if not index_file.exists():
+        return {"message": "XJGPT frontend is not installed."}
+    return FileResponse(index_file)
 
 
 @app.post("/v1/chat")
