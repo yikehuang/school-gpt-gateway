@@ -19,6 +19,9 @@ school_gpt_state.json
 request.json
 private_request.json
 
+# Local discovery reports
+local_discovery/
+
 # Release bundles
 release/
 
