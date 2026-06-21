@@ -217,6 +217,30 @@ Safety requirements for Codex:
 - Codex should not call the real school XipuAI backend in CI.
 - Codex should preserve compatibility for `/v1/chat` and `/v1/chat/completions`.
 
+## 2026-06-22 — Codex-ready implementation branch
+
+The Codex adaptation was implemented in a separate branch:
+
+```text
+feature/codex-ready
+```
+
+Main changes:
+
+- Added `AGENTS.md` for repository-level Codex instructions.
+- Added `scripts/codex_setup.sh` for dependency installation and safe setup.
+- Added `scripts/codex_check.sh` for syntax/import/frontend/documentation checks.
+- Added `docs/CODEX.md` for the human-readable Codex integration guide.
+- Added `docs/CODEX_QUICK_TASKS.md` with safe Codex task examples.
+- Added `.github/workflows/codex-check.yml` for pull request and feature branch validation.
+- Added `docs/CODEX_STATUS.md` as the branch status summary.
+
+Safety boundary:
+
+- The Codex check workflow does not call XipuAI.
+- The Codex check workflow does not require `school_gpt_state.json`.
+- The instructions explicitly forbid committing cookies, tokens, `.env`, login state files, and local discovery outputs.
+
 ## Current status summary
 
 Stable branch:
@@ -249,9 +273,22 @@ Contains:
 - endpoint discovery tooling
 - local cookie-mode testing scripts
 
+Codex branch:
+
+```text
+feature/codex-ready
+```
+
+Contains:
+
+- repository-level Codex instructions
+- safe setup and validation scripts
+- Codex documentation
+- CI workflow for Codex-safe checks
+
 Recommended next steps:
 
 1. Keep `main` as the stable demonstration branch.
 2. Continue testing direct cookie/backend access in `feature/cookie-http-adapter`.
-3. Add the Codex files in a separate `feature/codex-ready` branch before asking Codex to make larger code changes.
+3. Review and merge `feature/codex-ready` when the Codex check passes.
 4. Avoid storing any real login state, cookie, token, or school account data in GitHub.
