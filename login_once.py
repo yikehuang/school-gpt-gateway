@@ -1,7 +1,7 @@
 from playwright.sync_api import sync_playwright
 
-# TODO: 改成学校网页版 GPT 的真实地址
-SCHOOL_GPT_URL = "https://your-school-gpt-url.example.com"
+# 西交利物浦大学 Ehall AI 页面
+SCHOOL_GPT_URL = "https://ehall.xjtlu.edu.cn/default/index.html#/wiseQA"
 
 
 def main():
@@ -10,10 +10,10 @@ def main():
         context = browser.new_context()
         page = context.new_page()
 
-        page.goto(SCHOOL_GPT_URL)
+        page.goto(SCHOOL_GPT_URL, wait_until="networkidle")
 
-        print("请在打开的浏览器中手动登录学校 GPT。")
-        print("登录完成并看到聊天页面后，回到终端按 Enter。")
+        print("请在打开的浏览器中手动登录学校 Ehall AI。")
+        print("登录完成并看到 Ehall AI 聊天页面后，回到终端按 Enter。")
         input()
 
         context.storage_state(path="school_gpt_state.json")
