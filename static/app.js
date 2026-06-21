@@ -5,35 +5,82 @@ const promptInput = document.getElementById("promptInput");
 const sendButton = document.getElementById("sendButton");
 const newChatButton = document.getElementById("newChatButton");
 const conversationList = document.getElementById("conversationList");
-const apiKeyInput = document.getElementById("apiKeyInput");
 const modelSelect = document.getElementById("modelSelect");
 const statusPill = document.getElementById("statusPill");
 const toggleSidebar = document.getElementById("toggleSidebar");
 const sidebar = document.getElementById("sidebar");
 
+const settingsModal = document.getElementById("settingsModal");
+const openSettingsButton = document.getElementById("openSettingsButton");
+const topSettingsButton = document.getElementById("topSettingsButton");
+const closeSettingsButton = document.getElementById("closeSettingsButton");
+const saveSettingsButton = document.getElementById("saveSettingsButton");
+const resetSettingsButton = document.getElementById("resetSettingsButton");
+const testApiButton = document.getElementById("testApiButton");
+const copyPreviewButton = document.getElementById("copyPreviewButton");
+const apiBaseUrlInput = document.getElementById("apiBaseUrlInput");
+const apiEndpointSelect = document.getElementById("apiEndpointSelect");
+const apiKeyInput = document.getElementById("apiKeyInput");
+const requestFormatSelect = document.getElementById("requestFormatSelect");
+const requestPreview = document.getElementById("requestPreview");
+
 const STORAGE_KEY = "xjgpt-conversations";
-const API_KEY_STORAGE = "xjgpt-api-key";
+const SETTINGS_STORAGE = "xjgpt-api-settings";
 const MODEL_STORAGE = "xjgpt-model";
+
+const DEFAULT_SETTINGS = {
+  apiBaseUrl: "",
+  chatEndpoint: "/v1/chat",
+  apiKey: "sk-student-demo-001",
+  requestFormat: "messages"
+};
 
 let conversations = loadConversations();
 let activeConversationId = conversations[0]?.id || createConversation().id;
 let isSending = false;
+let apiSettings = loadApiSettings();
 
-const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
-if (storedApiKey) {
-  apiKeyInput.value = storedApiKey;
+function loadApiSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE);
+    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : { ...DEFAULT_SETTINGS };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
 }
-apiKeyInput.addEventListener("input", () => {
-  localStorage.setItem(API_KEY_STORAGE, apiKeyInput.value.trim());
-});
 
-modelSelect.value = localStorage.getItem(MODEL_STORAGE) || modelSelect.value;
-modelSelect.addEventListener("change", () => {
-  localStorage.setItem(MODEL_STORAGE, modelSelect.value);
-});
+function saveApiSettings(settings) {
+  apiSettings = { ...DEFAULT_SETTINGS, ...settings };
+  localStorage.setItem(SETTINGS_STORAGE, JSON.stringify(apiSettings));
+}
 
-function getSelectedModelName() {
-  return modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
+function applySettingsToForm() {
+  apiBaseUrlInput.value = apiSettings.apiBaseUrl || "";
+  apiEndpointSelect.value = apiSettings.chatEndpoint || DEFAULT_SETTINGS.chatEndpoint;
+  apiKeyInput.value = apiSettings.apiKey || DEFAULT_SETTINGS.apiKey;
+  requestFormatSelect.value = apiSettings.requestFormat || DEFAULT_SETTINGS.requestFormat;
+  renderRequestPreview();
+}
+
+function readSettingsFromForm() {
+  return {
+    apiBaseUrl: apiBaseUrlInput.value.trim(),
+    chatEndpoint: apiEndpointSelect.value,
+    apiKey: apiKeyInput.value.trim(),
+    requestFormat: requestFormatSelect.value
+  };
+}
+
+function buildApiUrl() {
+  const baseUrl = (apiSettings.apiBaseUrl || "").trim().replace(/\/$/, "");
+  const endpoint = apiSettings.chatEndpoint || "/v1/chat";
+
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+
+  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  return baseUrl ? `${baseUrl}${normalizedEndpoint}` : normalizedEndpoint;
 }
 
 function loadConversations() {
@@ -68,6 +115,59 @@ function getActiveConversation() {
     activeConversationId = conversation.id;
   }
   return conversation;
+}
+
+function getSelectedModelName() {
+  return modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
+}
+
+function buildChatPayload(question, model) {
+  const format = apiSettings.requestFormat || "messages";
+
+  if (format === "question") {
+    return {
+      question,
+      model
+    };
+  }
+
+  return {
+    model,
+    messages: [
+      {
+        role: "user",
+        content: question
+      }
+    ]
+  };
+}
+
+function renderRequestPreview() {
+  if (!requestPreview) return;
+
+  const draftSettings = readSettingsFromForm();
+  const previousSettings = apiSettings;
+  apiSettings = { ...DEFAULT_SETTINGS, ...draftSettings };
+
+  const payload = buildChatPayload("请只回复两个字：成功", modelSelect.value);
+  const preview = {
+    url: buildApiUrl(),
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + maskApiKey(apiSettings.apiKey),
+      "Content-Type": "application/json"
+    },
+    body: payload
+  };
+
+  apiSettings = previousSettings;
+  requestPreview.textContent = JSON.stringify(preview, null, 2);
+}
+
+function maskApiKey(key) {
+  if (!key) return "";
+  if (key.length <= 8) return "********";
+  return `${key.slice(0, 5)}****${key.slice(-4)}`;
 }
 
 function renderConversationList() {
@@ -196,35 +296,54 @@ function removeTypingMessage() {
   if (typing) typing.remove();
 }
 
-function buildChatPayload(question, model) {
-  return {
-    model,
-    messages: [
-      {
-        role: "user",
-        content: question
-      }
-    ]
-  };
+function parseAssistantAnswer(data) {
+  return data.answer || data.choices?.[0]?.message?.content || "学校 GPT 返回了空回答。";
+}
+
+function parseUsage(data) {
+  const total = data.usage?.total_tokens ?? data.usage?.total ?? "-";
+  const prompt = data.usage?.input_tokens ?? data.usage?.prompt_tokens ?? "-";
+  const completion = data.usage?.output_tokens ?? data.usage?.completion_tokens ?? "-";
+  return { total, prompt, completion };
+}
+
+async function callConfiguredApi(question, model) {
+  const apiKey = apiSettings.apiKey.trim();
+
+  if (!apiKey) {
+    throw new Error("API Key 缺失。请打开设置填写 Authorization Bearer Key。");
+  }
+
+  const response = await fetch(buildApiUrl(), {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(buildChatPayload(question, model))
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const detail = data.detail || data.error?.message || "请求失败";
+    throw new Error(detail);
+  }
+
+  return data;
 }
 
 async function sendMessage(question) {
-  const apiKey = apiKeyInput.value.trim();
   const model = modelSelect.value;
   const modelName = getSelectedModelName();
-
-  if (!apiKey) {
-    setStatus("Missing API key", "error");
-    alert("后端演示 API Key 缺失。请检查 static/index.html 中的隐藏输入值。 ");
-    return;
-  }
 
   const conversation = getActiveConversation();
   conversation.messages.push({
     role: "user",
     content: question,
     meta: {
-      model: modelName
+      model: modelName,
+      endpoint: apiSettings.chatEndpoint
     }
   });
 
@@ -241,29 +360,18 @@ async function sendMessage(question) {
   setStatus(`Asking ${modelName}`, "loading");
 
   try {
-    const response = await fetch("/v1/chat", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(buildChatPayload(question, model))
-    });
-
-    const data = await response.json();
+    const data = await callConfiguredApi(question, model);
+    const answer = parseAssistantAnswer(data);
+    const usage = parseUsage(data);
     removeTypingMessage();
-
-    if (!response.ok) {
-      const detail = data.detail || "请求失败";
-      throw new Error(detail);
-    }
 
     conversation.messages.push({
       role: "assistant",
-      content: data.answer || "学校 GPT 返回了空回答。",
+      content: answer,
       meta: {
         model: data.model_name || data.model || modelName,
-        tokens: data.usage?.total_tokens ?? "-",
+        runtime: data.runtime_model || data.model || "-",
+        tokens: usage.total,
         latency: `${data.latency_ms ?? "-"}ms`
       }
     });
@@ -275,7 +383,7 @@ async function sendMessage(question) {
     removeTypingMessage();
     conversation.messages.push({
       role: "assistant",
-      content: `请求失败：${error.message}\n\n请检查：1）是否已运行 python login_once.py 保存登录状态；2）XipuAI 页面是否能正常访问；3）页面选择器是否需要调整；4）你选择的模型名称是否和学校网页里的模型名称一致。`
+      content: `请求失败：${error.message}\n\n请检查：1）设置里的 API Base URL、Endpoint 和 Key 是否正确；2）是否已运行 python login_once.py 保存登录状态；3）XipuAI 页面是否能正常访问；4）页面选择器是否需要调整；5）你选择的模型名称是否和学校网页里的模型名称一致。`
     });
     saveConversations();
     setStatus("Error", "error");
@@ -284,6 +392,61 @@ async function sendMessage(question) {
     isSending = false;
     sendButton.disabled = false;
     promptInput.focus();
+  }
+}
+
+function openSettings() {
+  applySettingsToForm();
+  settingsModal.classList.add("open");
+  settingsModal.setAttribute("aria-hidden", "false");
+  apiBaseUrlInput.focus();
+}
+
+function closeSettings() {
+  settingsModal.classList.remove("open");
+  settingsModal.setAttribute("aria-hidden", "true");
+}
+
+function saveSettingsFromModal() {
+  saveApiSettings(readSettingsFromForm());
+  renderRequestPreview();
+  setStatus("Settings saved");
+  closeSettings();
+}
+
+function resetSettings() {
+  saveApiSettings({ ...DEFAULT_SETTINGS });
+  applySettingsToForm();
+  setStatus("Settings reset");
+}
+
+async function testApiFromSettings() {
+  saveApiSettings(readSettingsFromForm());
+  renderRequestPreview();
+  testApiButton.disabled = true;
+  testApiButton.textContent = "测试中...";
+  setStatus("Testing API", "loading");
+
+  try {
+    const data = await callConfiguredApi("请只回复两个字：成功", modelSelect.value);
+    const answer = parseAssistantAnswer(data);
+    setStatus("API OK");
+    alert(`API 测试成功：${answer}`);
+  } catch (error) {
+    setStatus("API Error", "error");
+    alert(`API 测试失败：${error.message}`);
+  } finally {
+    testApiButton.disabled = false;
+    testApiButton.textContent = "测试 API";
+  }
+}
+
+async function copyPreview() {
+  try {
+    await navigator.clipboard.writeText(requestPreview.textContent);
+    setStatus("Copied");
+  } catch {
+    setStatus("Copy failed", "error");
   }
 }
 
@@ -318,5 +481,31 @@ toggleSidebar.addEventListener("click", () => {
   sidebar.classList.toggle("open");
 });
 
+openSettingsButton.addEventListener("click", openSettings);
+topSettingsButton.addEventListener("click", openSettings);
+closeSettingsButton.addEventListener("click", closeSettings);
+saveSettingsButton.addEventListener("click", saveSettingsFromModal);
+resetSettingsButton.addEventListener("click", resetSettings);
+testApiButton.addEventListener("click", testApiFromSettings);
+copyPreviewButton.addEventListener("click", copyPreview);
+
+[apiBaseUrlInput, apiEndpointSelect, apiKeyInput, requestFormatSelect].forEach(input => {
+  input.addEventListener("input", renderRequestPreview);
+  input.addEventListener("change", renderRequestPreview);
+});
+
+settingsModal.addEventListener("click", event => {
+  if (event.target === settingsModal) {
+    closeSettings();
+  }
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && settingsModal.classList.contains("open")) {
+    closeSettings();
+  }
+});
+
+applySettingsToForm();
 render();
 resizeTextarea();
