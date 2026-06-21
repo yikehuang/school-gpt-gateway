@@ -45,6 +45,9 @@ INCLUDE_PATHS = [
     "login_once.py",
     "requirements.txt",
     "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
     "CHANGELOG.md",
     "pyproject.toml",
     "MANIFEST.in",
@@ -52,6 +55,7 @@ INCLUDE_PATHS = [
     "examples",
     "static",
     "docs",
+    "tests",
     "xjgpt_gateway",
 ]
 

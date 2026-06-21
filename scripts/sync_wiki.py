@@ -27,6 +27,25 @@ def run(command: list[str], cwd: Path | None = None) -> None:
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def get_repo_config(key: str) -> str | None:
+    result = subprocess.run(
+        ["git", "config", "--get", key],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    value = result.stdout.strip()
+    return value or None
+
+
+def configure_commit_identity(wiki_dir: Path) -> None:
+    for key in ("user.name", "user.email"):
+        value = get_repo_config(key)
+        if value:
+            run(["git", "config", key, value], cwd=wiki_dir)
+
+
 def main() -> None:
     if not SOURCE_DIR.exists():
         raise FileNotFoundError(f"Wiki source directory not found: {SOURCE_DIR}")
@@ -35,6 +54,7 @@ def main() -> None:
         wiki_dir = Path(temp_dir) / "wiki"
 
         run(["git", "clone", WIKI_REPO_URL, str(wiki_dir)])
+        configure_commit_identity(wiki_dir)
 
         # Remove existing Markdown pages in the Wiki clone.
         for path in wiki_dir.glob("*.md"):
