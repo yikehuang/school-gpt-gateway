@@ -1,6 +1,6 @@
 # School Web GPT Gateway
 
-这是一个面向学校网页版 GPT 的 AI 中转站项目。系统把学校网页版 GPT 封装成统一 API，前端或其他系统只需要请求 `/v1/chat`，中转站会完成用户鉴权、请求转发、回答读取、token 估算和日志记录。
+这是一个面向学校网页版 GPT 的 AI 中转站项目。系统把学校 XipuAI 网页版 GPT 封装成统一 API，前端或其他系统只需要请求 `/v1/chat`，中转站会完成用户鉴权、请求转发、回答读取、token 估算和日志记录。
 
 ## 1. Project Structure
 
@@ -25,26 +25,28 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## 4. Configure School GPT URL
+## 4. School GPT URL
 
-在 `login_once.py` 和 `school_gpt_adapter.py` 中修改：
+项目当前使用的学校 AI 地址是：
 
 ```python
-SCHOOL_GPT_URL = "https://your-school-gpt-url.example.com"
+SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
 ```
 
-然后根据学校 GPT 页面修改三个选择器：
+该地址已经写入 `login_once.py` 和 `school_gpt_adapter.py`。
+
+如果页面选择器不匹配，需要根据 XipuAI 页面修改这些候选选择器：
 
 ```python
-CHAT_INPUT_SELECTOR = "textarea"
-SEND_BUTTON_SELECTOR = "button[type='submit']"
-ANSWER_SELECTOR = ".assistant-message"
+CHAT_INPUT_SELECTORS = ["textarea", "[contenteditable='true']", "div[role='textbox']"]
+SEND_BUTTON_SELECTORS = ["button:has-text('发送')", "button:has-text('Send')", "button[type='submit']"]
+ANSWER_SELECTORS = [".assistant-message", ".ai-message", "[class*='assistant']", "[class*='message']"]
 ```
 
 如果选择器不确定，可以运行：
 
 ```bash
-playwright codegen https://your-school-gpt-url.example.com
+playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
 ```
 
 ## 5. Save Login State
@@ -53,7 +55,7 @@ playwright codegen https://your-school-gpt-url.example.com
 python login_once.py
 ```
 
-浏览器打开后，手动登录学校 GPT。登录完成并进入聊天页面后，回到终端按 Enter。程序会保存 `school_gpt_state.json`。
+浏览器打开后，手动登录学校 XipuAI。登录完成并进入聊天页面后，回到终端按 Enter。程序会保存 `school_gpt_state.json`。
 
 ## 6. Start Gateway
 
@@ -79,4 +81,4 @@ curl http://127.0.0.1:8000/admin/logs \
 
 ## 9. Competition Explanation
 
-本项目面向学校网页版 GPT 设计 AI 中转站。由于学校 GPT 主要以网页形式提供服务，系统使用 Web Adapter 把网页交互封装为统一 API。用户请求进入中转站后，系统先校验 API Key，再将问题提交至学校 GPT 页面，读取回答后返回给用户。系统同时记录 token 估算、响应耗时和调用状态，展示了校内模型资源统一接入、权限管理和用量治理能力。
+本项目面向学校网页版 GPT 设计 AI 中转站。由于学校 GPT 主要以网页形式提供服务，系统使用 Web Adapter 把网页交互封装为统一 API。用户请求进入中转站后，系统先校验 API Key，再将问题提交至学校 XipuAI 页面，读取回答后返回给用户。系统同时记录 token 估算、响应耗时和调用状态，展示了校内模型资源统一接入、权限管理和用量治理能力。
