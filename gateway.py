@@ -7,13 +7,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from school_gpt_adapter import ask_school_gpt, MODEL_LABELS
+from adapter_router import ask_school_gpt, MODEL_LABELS, get_adapter_status
 
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="XJGPT School Web GPT Gateway")
+app = FastAPI(title="XJGPT School GPT Gateway")
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -30,7 +30,7 @@ MODEL_OPTIONS = [
     {
         "id": "auto",
         "name": "Auto",
-        "description": "使用 XipuAI 网页当前已选择的模型"
+        "description": "使用 XipuAI 当前已选择的模型"
     },
     {
         "id": "school-web-gpt",
@@ -45,17 +45,17 @@ MODEL_OPTIONS = [
     {
         "id": "deepseek-r1",
         "name": "DeepSeek-R1",
-        "description": "如学校网页提供该模型，可从前端选择"
+        "description": "如学校提供该模型，可从前端选择"
     },
     {
         "id": "deepseek-v3",
         "name": "DeepSeek-V3",
-        "description": "如学校网页提供该模型，可从前端选择"
+        "description": "如学校提供该模型，可从前端选择"
     },
     {
         "id": "qwen-max",
         "name": "Qwen-Max",
-        "description": "如学校网页提供该模型，可从前端选择"
+        "description": "如学校提供该模型，可从前端选择"
     },
 ]
 
@@ -157,9 +157,11 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
     output_tokens = estimate_tokens(answer)
     total_tokens = input_tokens + output_tokens
     latency_ms = int((time.time() - start_time) * 1000)
+    adapter_status = get_adapter_status()
 
     log = {
         "user_id": user["user_id"],
+        "adapter_mode": adapter_status["mode"],
         "requested_model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
@@ -176,6 +178,7 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
 
     return {
         "object": "chat.completion",
+        "adapter_mode": adapter_status["mode"],
         "model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
@@ -203,6 +206,12 @@ def list_models():
         "object": "list",
         "data": MODEL_OPTIONS
     }
+
+
+@app.get("/v1/adapter")
+def adapter_status():
+    """Return active upstream adapter mode without exposing cookies or secrets."""
+    return get_adapter_status()
 
 
 @app.post("/v1/chat")
@@ -234,6 +243,7 @@ async def chat_completions(
         "id": f"xjgpt-{created}",
         "object": "chat.completion",
         "created": created,
+        "adapter_mode": result["adapter_mode"],
         "model": result["model"],
         "runtime_model": result["runtime_model"],
         "choices": [
