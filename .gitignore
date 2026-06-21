@@ -10,6 +10,7 @@ dist/
 
 # Environment variables
 .env
+.*.local
 
 # Playwright login state - DO NOT upload
 school_gpt_state.json
