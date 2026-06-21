@@ -39,14 +39,26 @@
           <span>XJGPT</span>
           <span class="model-pill">XipuAI Web Adapter</span>
         </div>
-        <div class="status-pill" id="statusPill">Ready</div>
+        <div class="topbar-actions">
+          <label class="model-select-control" for="modelSelect">
+            <span>模型</span>
+            <select id="modelSelect" class="model-select">
+              <option value="auto">Auto</option>
+              <option value="gpt-5.4">GPT-5.4</option>
+              <option value="deepseek-r1">DeepSeek-R1</option>
+              <option value="deepseek-v3">DeepSeek-V3</option>
+              <option value="qwen-max">Qwen-Max</option>
+            </select>
+          </label>
+          <div class="status-pill" id="statusPill">Ready</div>
+        </div>
       </header>
 
       <section class="messages" id="messages">
         <div class="welcome-card" id="welcomeCard">
           <div class="welcome-logo">XJ</div>
           <h1>XJGPT</h1>
-          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。</p>
+          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。你可以在右上角选择模型，中转站会把模型 id 一起传给后端。</p>
           <div class="suggestion-grid">
             <button class="suggestion">请解释什么是 AI 中转站</button>
             <button class="suggestion">How to book rooms?</button>
@@ -61,7 +73,7 @@
           <textarea id="promptInput" rows="1" placeholder="发送消息，Shift + Enter 换行"></textarea>
           <button id="sendButton" class="send-button" type="submit" aria-label="发送">↑</button>
         </form>
-        <div class="composer-hint">XJGPT 会把问题提交到学校 XipuAI 网页端。请不要输入敏感个人信息。</div>
+        <div class="composer-hint">XJGPT 会把问题和所选模型提交到中转站，再由中转站操作学校 XipuAI 网页端。请不要输入敏感个人信息。</div>
       </section>
     </main>
   </div>
