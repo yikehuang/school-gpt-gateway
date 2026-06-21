@@ -23,6 +23,8 @@ const apiBaseUrlInput = document.getElementById("apiBaseUrlInput");
 const apiEndpointSelect = document.getElementById("apiEndpointSelect");
 const apiKeyInput = document.getElementById("apiKeyInput");
 const requestFormatSelect = document.getElementById("requestFormatSelect");
+const gatewayModelSelect = document.getElementById("gatewayModelSelect");
+const gatewayThinkingSelect = document.getElementById("gatewayThinkingSelect");
 const requestPreview = document.getElementById("requestPreview");
 
 const STORAGE_KEY = "xjgpt-conversations";
@@ -129,6 +131,7 @@ function renderModelOptions(models, selectedModel) {
   }
 
   localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  syncGatewayModelOptions();
   renderRequestPreview();
 }
 
@@ -195,11 +198,61 @@ function getSelectedThinkingName() {
   return thinkingSelect.options[thinkingSelect.selectedIndex]?.textContent || THINKING_OPTIONS[thinkingSelect.value] || thinkingSelect.value;
 }
 
+function getConfiguredModel() {
+  if (settingsModal?.classList.contains("open") && gatewayModelSelect?.value) {
+    return gatewayModelSelect.value;
+  }
+
+  return modelSelect.value;
+}
+
+function getConfiguredThinking() {
+  if (settingsModal?.classList.contains("open") && gatewayThinkingSelect?.value) {
+    return gatewayThinkingSelect.value;
+  }
+
+  return getSelectedThinking();
+}
+
 function loadThinkingSelection() {
   const savedThinking = localStorage.getItem(THINKING_STORAGE);
 
   if (savedThinking && THINKING_OPTIONS[savedThinking]) {
     thinkingSelect.value = savedThinking;
+  }
+}
+
+function syncGatewayModelOptions() {
+  if (!gatewayModelSelect) return;
+
+  const selectedValue = gatewayModelSelect.value || modelSelect.value || "auto";
+  gatewayModelSelect.innerHTML = modelSelect.innerHTML;
+
+  const hasSelectedValue = Array.from(gatewayModelSelect.options).some(option => option.value === selectedValue);
+  if (hasSelectedValue) {
+    gatewayModelSelect.value = selectedValue;
+  } else {
+    gatewayModelSelect.value = modelSelect.value || "auto";
+  }
+}
+
+function syncGatewayConfigForm() {
+  syncGatewayModelOptions();
+
+  if (gatewayThinkingSelect) {
+    gatewayThinkingSelect.value = getSelectedThinking();
+  }
+}
+
+function applyGatewayConfigFromForm() {
+  if (gatewayModelSelect?.value) {
+    modelSelect.value = gatewayModelSelect.value;
+    localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  }
+
+  if (gatewayThinkingSelect?.value) {
+    thinkingSelect.value = gatewayThinkingSelect.value;
+    localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
   }
 }
 
@@ -234,7 +287,7 @@ function renderRequestPreview() {
   const previousSettings = apiSettings;
   apiSettings = { ...DEFAULT_SETTINGS, ...draftSettings };
 
-  const payload = buildChatPayload("请只回复两个字：成功", modelSelect.value, getSelectedThinking());
+  const payload = buildChatPayload("请只回复两个字：成功", getConfiguredModel(), getConfiguredThinking());
   const preview = {
     url: buildApiUrl(),
     method: "POST",
@@ -486,9 +539,11 @@ async function sendMessage(question) {
 
 function openSettings() {
   applySettingsToForm();
+  syncGatewayConfigForm();
+  renderRequestPreview();
   settingsModal.classList.add("open");
   settingsModal.setAttribute("aria-hidden", "false");
-  apiBaseUrlInput.focus();
+  gatewayModelSelect.focus();
 }
 
 function closeSettings() {
@@ -497,6 +552,7 @@ function closeSettings() {
 }
 
 function saveSettingsFromModal() {
+  applyGatewayConfigFromForm();
   saveApiSettings(readSettingsFromForm());
   loadModelOptions();
   renderRequestPreview();
@@ -507,11 +563,17 @@ function saveSettingsFromModal() {
 function resetSettings() {
   saveApiSettings({ ...DEFAULT_SETTINGS });
   applySettingsToForm();
+  modelSelect.value = "auto";
+  thinkingSelect.value = "minimal";
+  localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
+  syncGatewayConfigForm();
   loadModelOptions();
   setStatus("Settings reset");
 }
 
 async function testApiFromSettings() {
+  applyGatewayConfigFromForm();
   saveApiSettings(readSettingsFromForm());
   renderRequestPreview();
   testApiButton.disabled = true;
@@ -585,13 +647,19 @@ copyPreviewButton.addEventListener("click", copyPreview);
   input.addEventListener("change", renderRequestPreview);
 });
 
+[gatewayModelSelect, gatewayThinkingSelect].forEach(input => {
+  input.addEventListener("change", renderRequestPreview);
+});
+
 modelSelect.addEventListener("change", () => {
   localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  syncGatewayConfigForm();
   renderRequestPreview();
 });
 
 thinkingSelect.addEventListener("change", () => {
   localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
+  syncGatewayConfigForm();
   renderRequestPreview();
 });
 

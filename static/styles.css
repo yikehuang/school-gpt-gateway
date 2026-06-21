@@ -557,6 +557,23 @@ button {
   margin-top: 18px;
 }
 
+.settings-section {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.settings-section-header p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+  font-size: 13px;
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;

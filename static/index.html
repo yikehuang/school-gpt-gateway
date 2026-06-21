@@ -93,10 +93,42 @@
       <div class="modal-header">
         <div>
           <h2 id="settingsTitle">API 调用设置</h2>
-          <p>这里控制 XJGPT 前端真正调用哪个 API、使用哪个 Endpoint 和 Authorization Key。</p>
+          <p>这里控制中转站默认模型、思考方法，以及 XJGPT 前端真正调用哪个 API。</p>
         </div>
         <button class="icon-button" id="closeSettingsButton" type="button" aria-label="关闭设置">×</button>
       </div>
+
+      <section class="settings-section">
+        <div class="settings-section-header">
+          <h3>中转站配置</h3>
+          <p>选择默认 AI 模型和思考方法，保存后会同步到顶部快捷栏和 API 请求预览。</p>
+        </div>
+
+        <div class="settings-grid">
+          <label class="settings-field">
+            <span>AI 种类 / 模型</span>
+            <select id="gatewayModelSelect"></select>
+            <small>模型列表会从学校 XipuAI 后台动态同步。</small>
+          </label>
+
+          <label class="settings-field">
+            <span>思考方法</span>
+            <select id="gatewayThinkingSelect">
+              <option value="minimal">关闭思考</option>
+              <option value="low">轻量思考</option>
+              <option value="medium">均衡模式</option>
+              <option value="high">深度分析</option>
+            </select>
+            <small>对应 API 字段：thinking / reasoning_effort。</small>
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-header">
+          <h3>API 服务</h3>
+          <p>配置 Base URL、Endpoint、Authorization Key 和请求体格式。</p>
+        </div>
 
       <div class="settings-grid">
         <label class="settings-field">
@@ -129,6 +161,7 @@
           <small>messages 格式更适合后续兼容 OpenAI-style 客户端。</small>
         </label>
       </div>
+      </section>
 
       <div class="settings-preview-wrap">
         <div class="preview-header">
