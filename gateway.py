@@ -63,12 +63,53 @@ LEGACY_MODEL_OPTIONS = [
 ]
 
 MODEL_OPTIONS = BASE_MODEL_OPTIONS + LEGACY_MODEL_OPTIONS
+THINKING_OPTIONS = [
+    {
+        "id": "minimal",
+        "name": "关闭思考",
+        "description": "对应 XipuAI 的 Close Thinking"
+    },
+    {
+        "id": "low",
+        "name": "轻量思考",
+        "description": "对应 XipuAI 的 Low"
+    },
+    {
+        "id": "medium",
+        "name": "均衡模式",
+        "description": "对应 XipuAI 的 Medium"
+    },
+    {
+        "id": "high",
+        "name": "深度分析",
+        "description": "对应 XipuAI 的 High"
+    },
+]
+THINKING_ALIASES = {
+    "": "minimal",
+    "none": "minimal",
+    "off": "minimal",
+    "close": "minimal",
+    "closed": "minimal",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "balanced": "medium",
+    "balance": "medium",
+    "high": "high",
+    "deep": "high",
+    "关闭思考": "minimal",
+    "轻量思考": "low",
+    "均衡模式": "medium",
+    "深度分析": "high",
+}
 MODEL_ALIASES = {
     "school-web-gpt": "auto",
     "xjgpt": "auto",
     "xipuai": "auto"
 }
 MODEL_NAME_CACHE = {model["id"]: model["name"] for model in MODEL_OPTIONS}
+THINKING_NAME_CACHE = {option["id"]: option["name"] for option in THINKING_OPTIONS}
 
 USAGE_LOGS = []
 
@@ -83,6 +124,11 @@ class ChatRequest(BaseModel):
     question: Optional[str] = None
     # OpenAI-style / chat-completions 兼容格式
     messages: Optional[List[ChatMessage]] = None
+    # XipuAI 思考程度：minimal / low / medium / high
+    thinking: Optional[str] = None
+    # OpenAI-style reasoning effort compatibility.
+    reasoning_effort: Optional[str] = None
+    reasoning: Optional[Dict[str, Any]] = None
     model: str = "auto"
 
 
@@ -112,6 +158,29 @@ def get_model_name(model_id: str) -> str:
         return "School Web GPT"
     label = MODEL_LABELS.get(model_id)
     return label or model_id
+
+
+def get_thinking_name(thinking: str) -> str:
+    return THINKING_NAME_CACHE.get(thinking, thinking)
+
+
+def normalize_thinking(request: ChatRequest) -> str:
+    raw = request.thinking or request.reasoning_effort
+
+    if not raw and isinstance(request.reasoning, dict):
+        raw = request.reasoning.get("effort")
+
+    key = str(raw or "minimal").strip().lower()
+    thinking = THINKING_ALIASES.get(key)
+
+    if thinking:
+        return thinking
+
+    allowed = ", ".join(option["id"] for option in THINKING_OPTIONS)
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported thinking value: {raw}. Use one of: {allowed}."
+    )
 
 
 def merge_model_options(*groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -175,11 +244,12 @@ def authenticate_user(authorization: str) -> Dict[str, Any]:
 async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[str, Any]:
     question = extract_question(request)
     requested_model, runtime_model = normalize_model(request.model)
+    thinking = normalize_thinking(request)
 
     start_time = time.time()
 
     try:
-        answer = await ask_school_gpt(question, model=runtime_model)
+        answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -193,6 +263,8 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
         "requested_model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
+        "thinking": thinking,
+        "thinking_name": get_thinking_name(thinking),
         "question_length": len(question),
         "answer_length": len(answer),
         "input_tokens": input_tokens,
@@ -209,6 +281,8 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
         "model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
+        "thinking": thinking,
+        "thinking_name": get_thinking_name(thinking),
         "answer": answer,
         "usage": {
             "input_tokens": input_tokens,
@@ -232,6 +306,14 @@ async def list_models():
     return {
         "object": "list",
         "data": await get_model_options()
+    }
+
+
+@app.get("/v1/thinking")
+def list_thinking_options():
+    return {
+        "object": "list",
+        "data": THINKING_OPTIONS
     }
 
 
@@ -266,6 +348,9 @@ async def chat_completions(
         "created": created,
         "model": result["model"],
         "runtime_model": result["runtime_model"],
+        "thinking": result["thinking"],
+        "reasoning_effort": result["thinking"],
+        "thinking_name": result["thinking_name"],
         "choices": [
             {
                 "index": 0,

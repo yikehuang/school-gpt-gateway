@@ -370,12 +370,13 @@ async def _post_direct_completion(
     client: httpx.AsyncClient,
     question: str,
     session_id: int,
+    thinking: str = "minimal",
 ) -> str:
     payload = {
         "text": question,
         "files": [],
         "online": 0,
-        "thinking": "minimal",
+        "thinking": thinking,
         "sessionId": session_id,
         "responseId": None,
     }
@@ -419,7 +420,11 @@ async def _post_direct_completion(
     return answer
 
 
-async def ask_school_gpt_direct(question: str, model: str | None = "auto") -> str:
+async def ask_school_gpt_direct(
+    question: str,
+    model: str | None = "auto",
+    thinking: str = "minimal",
+) -> str:
     """
     使用保存下来的学校登录态，直接请求 XipuAI 后台接口。
 
@@ -433,7 +438,7 @@ async def ask_school_gpt_direct(question: str, model: str | None = "auto") -> st
                 session = await _get_latest_session(client)
                 model_value = await _resolve_direct_model(client, model)
                 await _set_session_model_if_needed(client, session, model_value)
-                return await _post_direct_completion(client, question, int(session["id"]))
+                return await _post_direct_completion(client, question, int(session["id"]), thinking=thinking)
         except DirectBackendError as exc:
             if _is_rate_limit_error(exc) and attempt < 2:
                 await asyncio.sleep(2 + attempt * 3)
@@ -634,7 +639,11 @@ async def _extract_latest_answer(page, question: str) -> str:
     raise RuntimeError("没有读取到 XipuAI 的回答。")
 
 
-async def ask_school_gpt_browser(question: str, model: str | None = "auto") -> str:
+async def ask_school_gpt_browser(
+    question: str,
+    model: str | None = "auto",
+    thinking: str = "minimal",
+) -> str:
     """
     使用学校授权的 XipuAI 网页作为上游服务。
 
@@ -684,10 +693,14 @@ async def ask_school_gpt_browser(question: str, model: str | None = "auto") -> s
             await browser.close()
 
 
-async def ask_school_gpt(question: str, model: str | None = "auto") -> str:
+async def ask_school_gpt(
+    question: str,
+    model: str | None = "auto",
+    thinking: str = "minimal",
+) -> str:
     try:
-        return await ask_school_gpt_direct(question, model=model)
+        return await ask_school_gpt_direct(question, model=model, thinking=thinking)
     except DirectBackendError:
         raise
     except DirectAdapterError:
-        return await ask_school_gpt_browser(question, model=model)
+        return await ask_school_gpt_browser(question, model=model, thinking=thinking)

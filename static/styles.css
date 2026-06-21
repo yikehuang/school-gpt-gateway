@@ -271,6 +271,10 @@ button {
   text-overflow: ellipsis;
 }
 
+.thinking-select {
+  min-width: 92px;
+}
+
 .model-pill,
 .status-pill {
   border-radius: 999px;

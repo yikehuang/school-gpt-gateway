@@ -6,6 +6,7 @@ const sendButton = document.getElementById("sendButton");
 const newChatButton = document.getElementById("newChatButton");
 const conversationList = document.getElementById("conversationList");
 const modelSelect = document.getElementById("modelSelect");
+const thinkingSelect = document.getElementById("thinkingSelect");
 const statusPill = document.getElementById("statusPill");
 const toggleSidebar = document.getElementById("toggleSidebar");
 const sidebar = document.getElementById("sidebar");
@@ -27,6 +28,7 @@ const requestPreview = document.getElementById("requestPreview");
 const STORAGE_KEY = "xjgpt-conversations";
 const SETTINGS_STORAGE = "xjgpt-api-settings";
 const MODEL_STORAGE = "xjgpt-model";
+const THINKING_STORAGE = "xjgpt-thinking";
 
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "",
@@ -39,6 +41,13 @@ const FALLBACK_MODELS = Array.from(modelSelect.options).map(option => ({
   id: option.value,
   name: option.textContent
 }));
+
+const THINKING_OPTIONS = {
+  minimal: "关闭思考",
+  low: "轻量思考",
+  medium: "均衡模式",
+  high: "深度分析"
+};
 
 let conversations = loadConversations();
 let activeConversationId = conversations[0]?.id || createConversation().id;
@@ -178,18 +187,37 @@ function getSelectedModelName() {
   return modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
 }
 
-function buildChatPayload(question, model) {
+function getSelectedThinking() {
+  return thinkingSelect.value || "minimal";
+}
+
+function getSelectedThinkingName() {
+  return thinkingSelect.options[thinkingSelect.selectedIndex]?.textContent || THINKING_OPTIONS[thinkingSelect.value] || thinkingSelect.value;
+}
+
+function loadThinkingSelection() {
+  const savedThinking = localStorage.getItem(THINKING_STORAGE);
+
+  if (savedThinking && THINKING_OPTIONS[savedThinking]) {
+    thinkingSelect.value = savedThinking;
+  }
+}
+
+function buildChatPayload(question, model, thinking = getSelectedThinking()) {
   const format = apiSettings.requestFormat || "messages";
 
   if (format === "question") {
     return {
       question,
-      model
+      model,
+      thinking
     };
   }
 
   return {
     model,
+    thinking,
+    reasoning_effort: thinking,
     messages: [
       {
         role: "user",
@@ -206,7 +234,7 @@ function renderRequestPreview() {
   const previousSettings = apiSettings;
   apiSettings = { ...DEFAULT_SETTINGS, ...draftSettings };
 
-  const payload = buildChatPayload("请只回复两个字：成功", modelSelect.value);
+  const payload = buildChatPayload("请只回复两个字：成功", modelSelect.value, getSelectedThinking());
   const preview = {
     url: buildApiUrl(),
     method: "POST",
@@ -364,7 +392,7 @@ function parseUsage(data) {
   return { total, prompt, completion };
 }
 
-async function callConfiguredApi(question, model) {
+async function callConfiguredApi(question, model, thinking = getSelectedThinking()) {
   const apiKey = apiSettings.apiKey.trim();
 
   if (!apiKey) {
@@ -377,7 +405,7 @@ async function callConfiguredApi(question, model) {
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(buildChatPayload(question, model))
+    body: JSON.stringify(buildChatPayload(question, model, thinking))
   });
 
   const data = await response.json().catch(() => ({}));
@@ -393,6 +421,8 @@ async function callConfiguredApi(question, model) {
 async function sendMessage(question) {
   const model = modelSelect.value;
   const modelName = getSelectedModelName();
+  const thinking = getSelectedThinking();
+  const thinkingName = getSelectedThinkingName();
 
   const conversation = getActiveConversation();
   conversation.messages.push({
@@ -400,6 +430,7 @@ async function sendMessage(question) {
     content: question,
     meta: {
       model: modelName,
+      thinking: thinkingName,
       endpoint: apiSettings.chatEndpoint
     }
   });
@@ -410,14 +441,14 @@ async function sendMessage(question) {
 
   saveConversations();
   render();
-  addTypingMessage(modelName);
+  addTypingMessage(`${modelName} / ${thinkingName}`);
 
   isSending = true;
   sendButton.disabled = true;
   setStatus(`Asking ${modelName}`, "loading");
 
   try {
-    const data = await callConfiguredApi(question, model);
+    const data = await callConfiguredApi(question, model, thinking);
     const answer = parseAssistantAnswer(data);
     const usage = parseUsage(data);
     removeTypingMessage();
@@ -428,6 +459,7 @@ async function sendMessage(question) {
       meta: {
         model: data.model_name || data.model || modelName,
         runtime: data.runtime_model || data.model || "-",
+        thinking: data.thinking_name || data.thinking || thinkingName,
         tokens: usage.total,
         latency: `${data.latency_ms ?? "-"}ms`
       }
@@ -487,7 +519,7 @@ async function testApiFromSettings() {
   setStatus("Testing API", "loading");
 
   try {
-    const data = await callConfiguredApi("请只回复两个字：成功", modelSelect.value);
+    const data = await callConfiguredApi("请只回复两个字：成功", modelSelect.value, getSelectedThinking());
     const answer = parseAssistantAnswer(data);
     setStatus("API OK");
     alert(`API 测试成功：${answer}`);
@@ -558,6 +590,11 @@ modelSelect.addEventListener("change", () => {
   renderRequestPreview();
 });
 
+thinkingSelect.addEventListener("change", () => {
+  localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
+  renderRequestPreview();
+});
+
 settingsModal.addEventListener("click", event => {
   if (event.target === settingsModal) {
     closeSettings();
@@ -570,6 +607,7 @@ document.addEventListener("keydown", event => {
   }
 });
 
+loadThinkingSelection();
 applySettingsToForm();
 loadModelOptions();
 render();

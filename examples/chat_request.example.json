@@ -1,5 +1,6 @@
 {
   "model": "school-web-gpt",
+  "reasoning_effort": "minimal",
   "messages": [
     {
       "content": "请只回复两个字：普通",
