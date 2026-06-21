@@ -1,0 +1,29 @@
+# Git
+.git
+.github
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+
+# Local secrets and login state
+.env
+school_gpt_state.json
+*.local.json
+request.json
+private_request.json
+
+# Logs and release output
+*.log
+release/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
