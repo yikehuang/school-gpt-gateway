@@ -10,6 +10,13 @@ school_gpt_gateway/
 ├── school_gpt_adapter.py   # 学校网页版 GPT 适配器
 ├── login_once.py           # 手动登录并保存学校 GPT 登录状态
 ├── requirements.txt
+├── scripts/
+│   ├── start_gateway.ps1
+│   ├── start_serveo_tunnel.ps1
+│   ├── start_pinggy_tunnel.ps1
+│   ├── start_pinggy_tunnel.py
+│   └── start_tunnel.ps1
+├── .env.example
 ├── .gitignore
 └── README.md
 ```
@@ -25,6 +32,8 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+On Windows, the project can also use an installed Edge or Chrome browser, so a full Playwright Chromium download is not always required.
+
 ## 4. School GPT URL
 
 项目当前使用的学校 AI 地址是：
@@ -34,20 +43,6 @@ SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
 ```
 
 该地址已经写入 `login_once.py` 和 `school_gpt_adapter.py`。
-
-如果页面选择器不匹配，需要根据 XipuAI 页面修改这些候选选择器：
-
-```python
-CHAT_INPUT_SELECTORS = ["textarea", "[contenteditable='true']", "div[role='textbox']"]
-SEND_BUTTON_SELECTORS = ["button:has-text('发送')", "button:has-text('Send')", "button[type='submit']"]
-ANSWER_SELECTORS = [".assistant-message", ".ai-message", "[class*='assistant']", "[class*='message']"]
-```
-
-如果选择器不确定，可以运行：
-
-```bash
-playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
-```
 
 ## 5. Save Login State
 
@@ -59,26 +54,86 @@ python login_once.py
 
 ## 6. Start Gateway
 
-```bash
-uvicorn gateway:app --host 0.0.0.0 --port 8000
+Create `.env` from `.env.example` and set strong local keys:
+
+```text
+SCHOOL_GPT_API_KEY=sk-change-me
+SCHOOL_GPT_ADMIN_KEY=admin-change-me
 ```
 
-## 7. Test API
+Then start the gateway:
+
+```powershell
+.\scripts\start_gateway.ps1
+```
+
+Or manually:
+
+```bash
+uvicorn gateway:app --host 127.0.0.1 --port 8000
+```
+
+## 7. Test Custom API
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v1/chat \
-  -H "Authorization: Bearer sk-student-demo-001" \
+  -H "Authorization: Bearer sk-change-me" \
   -H "Content-Type: application/json" \
   -d "{\"question\":\"请解释什么是 AI 中转站\"}"
 ```
 
-## 8. Admin Logs
+## 8. OpenAI Compatible API
+
+The gateway exposes OpenAI-compatible endpoints:
+
+```text
+Base URL: http://127.0.0.1:8000/v1
+API Key: value of SCHOOL_GPT_API_KEY in .env
+Model: school-web-gpt
+```
+
+Supported endpoints:
+
+```text
+GET  /v1/models
+POST /v1/chat/completions
+```
+
+Example request:
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer sk-change-me" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"school-web-gpt\",\"messages\":[{\"role\":\"user\",\"content\":\"你好\"}]}"
+```
+
+Streaming is supported with `stream: true`. The streaming endpoint sends heartbeat comments while waiting for the upstream web GPT, which helps free HTTP tunnels stay open.
+
+## 9. Local Tunnel
+
+Start the gateway and Serveo tunnel in two PowerShell windows:
+
+```powershell
+.\scripts\start_gateway.ps1
+.\scripts\start_serveo_tunnel.ps1
+```
+
+Use the generated `*.serveousercontent.com/v1` URL as the public OpenAI-compatible Base URL.
+
+For external clients, enable streaming (`stream: true`) because free HTTP tunnel services may time out non-streaming requests before the upstream web GPT finishes.
+
+If Serveo is unavailable, `./scripts/start_pinggy_tunnel.ps1` or `./scripts/start_tunnel.ps1` can start Pinggy or Cloudflare Quick Tunnel fallbacks.
+
+Do not commit `.env` or `school_gpt_state.json`.
+
+## 10. Admin Logs
 
 ```bash
 curl http://127.0.0.1:8000/admin/logs \
-  -H "Authorization: Bearer admin-demo-key"
+  -H "Authorization: Bearer admin-change-me"
 ```
 
-## 9. Competition Explanation
+## 11. Competition Explanation
 
 本项目面向学校网页版 GPT 设计 AI 中转站。由于学校 GPT 主要以网页形式提供服务，系统使用 Web Adapter 把网页交互封装为统一 API。用户请求进入中转站后，系统先校验 API Key，再将问题提交至学校 XipuAI 页面，读取回答后返回给用户。系统同时记录 token 估算、响应耗时和调用状态，展示了校内模型资源统一接入、权限管理和用量治理能力。
