@@ -1,5 +1,10 @@
 FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
+LABEL org.opencontainers.image.title="XJGPT School Gateway"
+LABEL org.opencontainers.image.description="ChatGPT-like gateway for XJTLU XipuAI school web GPT"
+LABEL org.opencontainers.image.source="https://github.com/yikehuang/school-gpt-gateway"
+LABEL org.opencontainers.image.licenses="MIT"
+
 WORKDIR /app
 
 COPY . .
