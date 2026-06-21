@@ -8,6 +8,13 @@ env/
 # Environment variables
 .env
 
+# Local tunnel binary and runtime files
+tools/
+.tunnel-url.txt
+*-known-hosts
+pinggy_start_tunnel_temp.py
+public-*-test.json
+
 # Playwright login state - DO NOT upload
 school_gpt_state.json
 

@@ -1,38 +1,36 @@
+import asyncio
+
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
-# 西交利物浦大学 XipuAI 网页版 GPT
 SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
 
-# XipuAI 聊天输入框候选选择器。
-# 如果学校页面更新，可以运行：playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
-# 然后把录制出的输入框选择器替换或补充到这里。
 CHAT_INPUT_SELECTORS = [
-    "textarea[placeholder*='发送']",
-    "textarea[placeholder*='输入']",
+    "textarea.n-input__textarea-el[placeholder*='Input chat content']",
+    "textarea[placeholder*='Input chat content']",
     "textarea[placeholder*='message']",
     "textarea[placeholder*='Message']",
     "textarea",
     "[contenteditable='true']",
     "div[role='textbox']",
-    "input[placeholder*='发送']",
-    "input[placeholder*='输入']",
 ]
 
-# 多数 GPT 网页支持普通 Enter 发送，Shift + Enter 换行。
 SEND_BY_ENTER = True
 
-# 如果 Enter 不发送，可以把 SEND_BY_ENTER 改成 False，并调整按钮选择器。
 SEND_BUTTON_SELECTORS = [
-    "button:has-text('发送')",
     "button:has-text('Send')",
     "button[type='submit']",
-    "[aria-label*='发送']",
     "[aria-label*='send']",
     "[aria-label*='Send']",
 ]
 
-# 常见 AI 回复区域选择器。若读取失败，需要用浏览器开发者工具确认真实 class。
+NEW_CHAT_BUTTON_SELECTORS = [
+    "button.n-button--medium-type.bg-gradient-to-br",
+]
+
 ANSWER_SELECTORS = [
+    ".xp-chat-content",
+    ".bg-white .xp-chat-content",
+    ".bg-white.rounded-b-xl.rounded-tr-xl",
     ".assistant-message",
     ".ai-message",
     ".bot-message",
@@ -40,13 +38,75 @@ ANSWER_SELECTORS = [
     "[class*='assistant']",
     "[class*='answer']",
     "[class*='markdown']",
-    "[class*='message']",
-    "[class*='chat']",
 ]
+
+GENERATING_TEXT_MARKERS = (
+    "thinking",
+    "thinking...",
+    "thinking…",
+    "loading",
+    "generating",
+)
+
+_BROWSER_LOCK = asyncio.Lock()
+_PLAYWRIGHT = None
+_BROWSER = None
+_CONTEXT = None
+_PAGE = None
+
+
+async def _launch_chromium(playwright, *, headless: bool):
+    last_error = None
+
+    for channel in ("msedge", "chrome", None):
+        options = {"headless": headless}
+        if channel:
+            options["channel"] = channel
+
+        try:
+            return await playwright.chromium.launch(**options)
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError("No Chromium-compatible browser could be launched.") from last_error
+
+
+async def _reset_browser() -> None:
+    global _PLAYWRIGHT, _BROWSER, _CONTEXT, _PAGE
+
+    for resource in (_PAGE, _CONTEXT, _BROWSER):
+        if resource is not None:
+            try:
+                await resource.close()
+            except Exception:
+                pass
+
+    if _PLAYWRIGHT is not None:
+        try:
+            await _PLAYWRIGHT.stop()
+        except Exception:
+            pass
+
+    _PLAYWRIGHT = None
+    _BROWSER = None
+    _CONTEXT = None
+    _PAGE = None
+
+
+async def _get_page():
+    global _PLAYWRIGHT, _BROWSER, _CONTEXT, _PAGE
+
+    if _PAGE is not None and not _PAGE.is_closed():
+        return _PAGE
+
+    _PLAYWRIGHT = await async_playwright().start()
+    _BROWSER = await _launch_chromium(_PLAYWRIGHT, headless=True)
+    _CONTEXT = await _BROWSER.new_context(storage_state="school_gpt_state.json")
+    _PAGE = await _CONTEXT.new_page()
+    return _PAGE
 
 
 async def _fill_first_available(page, selectors, text: str) -> str:
-    """找到第一个可见输入框并输入文本，返回实际使用的选择器。"""
     for selector in selectors:
         locator = page.locator(selector).first
         try:
@@ -56,11 +116,10 @@ async def _fill_first_available(page, selectors, text: str) -> str:
         except Exception:
             continue
 
-    raise RuntimeError("没有找到 XipuAI 的输入框。请使用 playwright codegen 确认输入框选择器。")
+    raise RuntimeError("Could not find the XipuAI chat input.")
 
 
 async def _click_first_available(page, selectors) -> str:
-    """找到第一个可点击发送按钮并点击，返回实际使用的选择器。"""
     for selector in selectors:
         locator = page.locator(selector).first
         try:
@@ -70,71 +129,104 @@ async def _click_first_available(page, selectors) -> str:
         except Exception:
             continue
 
-    raise RuntimeError("没有找到 XipuAI 的发送按钮。可以先把 SEND_BY_ENTER 改回 True，或用 codegen 确认按钮选择器。")
+    raise RuntimeError("Could not find the XipuAI send button.")
 
 
-async def _extract_latest_answer(page, question: str) -> str:
-    """从候选消息区域中提取最后一段不像用户问题的文本。"""
+async def _start_new_chat(page) -> None:
+    for selector in NEW_CHAT_BUTTON_SELECTORS:
+        locator = page.locator(selector).first
+        try:
+            await locator.wait_for(state="visible", timeout=5000)
+            await locator.click()
+            await page.wait_for_timeout(2000)
+            return
+        except Exception:
+            continue
+
+
+def _clean_text(text: str) -> str:
+    return "\n".join(line.rstrip() for line in text.strip().splitlines()).strip()
+
+
+def _squash_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _looks_like_non_answer(text: str, question: str) -> bool:
+    if not text or text == question:
+        return True
+
+    squashed_text = _squash_text(text)
+    squashed_question = _squash_text(question)
+    if squashed_question and squashed_question in squashed_text:
+        tail = squashed_text[squashed_text.rfind(squashed_question) + len(squashed_question):].strip()
+        if len(tail) < 8:
+            return True
+
+    normalized = text.strip().lower()
+    if normalized in GENERATING_TEXT_MARKERS:
+        return True
+    if any(marker in normalized for marker in GENERATING_TEXT_MARKERS):
+        if len(normalized) <= 80:
+            return True
+
+    if "hello, welcome" in normalized:
+        return True
+    if "hello, i am your ai assistant" in normalized:
+        return True
+    if "shift" in normalized and "enter" in normalized and len(text) < 120:
+        return True
+
+    return False
+
+
+async def _collect_answer_candidates(page, question: str):
     candidates = []
 
     for selector in ANSWER_SELECTORS:
         try:
             texts = await page.locator(selector).all_inner_texts()
             for text in texts:
-                cleaned = text.strip()
-                if cleaned and cleaned != question and cleaned not in candidates:
+                cleaned = _clean_text(text)
+                if cleaned and cleaned not in candidates:
                     candidates.append(cleaned)
         except Exception:
             continue
 
-    # 过滤欢迎语、用户原问题、输入提示，尽量保留最后一次 AI 回复。
-    filtered = []
-    for text in candidates:
-        if question in text and len(text) <= len(question) + 20:
-            continue
-        if "Hello, Welcome" in text:
-            continue
-        if "欢迎" in text and len(text) < 80:
-            continue
-        if "Shift" in text and "Enter" in text and len(text) < 80:
-            continue
-        if "shift" in text and "enter" in text and len(text) < 80:
-            continue
-        filtered.append(text)
+    return candidates
 
-    if filtered:
-        return filtered[-1]
+
+async def _extract_latest_answer(page, question: str, previous_candidates=None) -> str:
+    previous = set(previous_candidates or [])
+
+    for _ in range(30):
+        candidates = await _collect_answer_candidates(page, question)
+        filtered = [
+            text
+            for text in candidates
+            if text not in previous and not _looks_like_non_answer(text, question)
+        ]
+
+        if filtered:
+            return filtered[-1]
+
+        await page.wait_for_timeout(2000)
 
     body_text = (await page.locator("body").inner_text()).strip()
     if body_text:
-        raise RuntimeError(
-            "页面已有文本，但没有识别出 AI 回复区域。请在 school_gpt_adapter.py 中更新 ANSWER_SELECTORS。"
-        )
+        raise RuntimeError("No new XipuAI answer was detected. Update ANSWER_SELECTORS if the page changed.")
 
-    raise RuntimeError("没有读取到 XipuAI 的回答。")
+    raise RuntimeError("No XipuAI answer text was found.")
 
 
 async def ask_school_gpt(question: str) -> str:
-    """
-    使用学校授权的 XipuAI 网页作为上游服务。
-
-    安全边界：
-    - 用户手动登录学校账号并保存本地状态；
-    - 程序不绕过学校登录或验证码；
-    - 程序不读取他人 Cookie；
-    - 日志只记录问题长度和回答长度，不保存真实对话原文。
-    """
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-
-        context = await browser.new_context(
-            storage_state="school_gpt_state.json"
-        )
-
-        page = await context.new_page()
-
+    async with _BROWSER_LOCK:
         try:
-            await page.goto(SCHOOL_GPT_URL, wait_until="networkidle", timeout=60000)
+            page = await _get_page()
+            await page.goto(SCHOOL_GPT_URL, wait_until="domcontentloaded", timeout=60000)
+            await _start_new_chat(page)
+
+            previous_candidates = await _collect_answer_candidates(page, question)
 
             await _fill_first_available(page, CHAT_INPUT_SELECTORS, question)
 
@@ -143,18 +235,17 @@ async def ask_school_gpt(question: str) -> str:
             else:
                 await _click_first_available(page, SEND_BUTTON_SELECTORS)
 
-            # 等待页面生成回答。真实页面若有“停止生成”按钮，可以改成等待该按钮消失。
-            await page.wait_for_timeout(8000)
-
-            answer = await _extract_latest_answer(page, question)
+            answer = await _extract_latest_answer(page, question, previous_candidates)
 
             if not answer:
-                raise RuntimeError("XipuAI 返回了空回答。")
+                raise RuntimeError("XipuAI returned an empty answer.")
 
             return answer
 
         except PlaywrightTimeoutError as exc:
-            raise RuntimeError("XipuAI 响应超时。") from exc
-
-        finally:
-            await browser.close()
+            await _reset_browser()
+            raise RuntimeError("XipuAI timed out.") from exc
+        except Exception:
+            if _PAGE is not None and _PAGE.is_closed():
+                await _reset_browser()
+            raise
