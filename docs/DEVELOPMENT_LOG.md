@@ -241,6 +241,25 @@ Safety boundary:
 - The Codex check workflow does not require `school_gpt_state.json`.
 - The instructions explicitly forbid committing cookies, tokens, `.env`, login state files, and local discovery outputs.
 
+## 2026-06-22 — Multi-tool AI coding assistant configuration
+
+The Codex-ready branch was extended to support multiple AI coding tools with the same safety boundary and project rules.
+
+Main changes:
+
+- Added `.cursor/rules/xjgpt-project.mdc` for Cursor project rules.
+- Added `.cursorrules` for legacy Cursor compatibility.
+- Added `.github/copilot-instructions.md` for GitHub Copilot repository guidance.
+- Added `.windsurfrules` for Windsurf.
+- Added `.clinerules` for Cline.
+- Added `docs/AI_ASSISTANT_TOOLS.md` to explain how each tool should read the repository rules.
+- Updated `docs/CODEX_STATUS.md` to list Codex, Cursor, Copilot, Windsurf, and Cline coverage.
+
+Safety boundary:
+
+- All tool-specific rule files prohibit committing cookies, tokens, `.env`, `school_gpt_state.json`, local discovery output, or personal school data.
+- All tools are instructed to use `bash scripts/codex_check.sh` for safe validation without calling XipuAI.
+
 ## Current status summary
 
 Stable branch:
@@ -285,6 +304,7 @@ Contains:
 - safe setup and validation scripts
 - Codex documentation
 - CI workflow for Codex-safe checks
+- Cursor, GitHub Copilot, Windsurf, and Cline rules
 
 Recommended next steps:
 
