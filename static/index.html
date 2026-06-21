@@ -26,8 +26,8 @@
       <div class="conversation-list" id="conversationList"></div>
 
       <div class="sidebar-footer">
-        <input id="apiKeyInput" class="api-key-input" type="hidden" value="sk-student-demo-001" />
-        <p class="footer-note">演示 API Key 已在界面中隐藏。正式项目应由后端生成并校验用户密钥。</p>
+        <button class="settings-button" id="openSettingsButton" type="button">⚙ API 调用设置</button>
+        <p class="footer-note">API 地址、Endpoint 和演示 Key 已放入软件设置。正式项目应由后端登录态管理密钥。</p>
       </div>
     </aside>
 
@@ -50,6 +50,7 @@
               <option value="qwen-max">Qwen-Max</option>
             </select>
           </label>
+          <button class="secondary-button" id="topSettingsButton" type="button">设置</button>
           <div class="status-pill" id="statusPill">Ready</div>
         </div>
       </header>
@@ -58,7 +59,7 @@
         <div class="welcome-card" id="welcomeCard">
           <div class="welcome-logo">XJ</div>
           <h1>XJGPT</h1>
-          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。前端会把输入内容转换为请求，由后端兼容普通 question 格式和 OpenAI-style messages 格式。</p>
+          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。API 调用配置已经放入软件设置，可修改 Base URL、Endpoint、API Key 和请求格式。</p>
           <div class="suggestion-grid">
             <button class="suggestion">请只回复两个字：普通</button>
             <button class="suggestion">请解释什么是 AI 中转站</button>
@@ -73,9 +74,69 @@
           <textarea id="promptInput" rows="1" placeholder="发送消息，Shift + Enter 换行"></textarea>
           <button id="sendButton" class="send-button" type="submit" aria-label="发送">↑</button>
         </form>
-        <div class="composer-hint">XJGPT 会把问题和所选模型提交到中转站，再由中转站操作学校 XipuAI 网页端。请不要输入敏感个人信息。</div>
+        <div class="composer-hint">XJGPT 会按“设置 → API 调用设置”中的配置提交请求。请不要输入敏感个人信息。</div>
       </section>
     </main>
+  </div>
+
+  <div class="modal-backdrop" id="settingsModal" aria-hidden="true">
+    <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-header">
+        <div>
+          <h2 id="settingsTitle">API 调用设置</h2>
+          <p>这里控制 XJGPT 前端真正调用哪个 API、使用哪个 Endpoint 和 Authorization Key。</p>
+        </div>
+        <button class="icon-button" id="closeSettingsButton" type="button" aria-label="关闭设置">×</button>
+      </div>
+
+      <div class="settings-grid">
+        <label class="settings-field">
+          <span>API Base URL</span>
+          <input id="apiBaseUrlInput" type="text" placeholder="留空表示当前网站，例如 http://127.0.0.1:8000" />
+          <small>本地演示建议留空；部署到其他后端时填写完整域名。</small>
+        </label>
+
+        <label class="settings-field">
+          <span>Chat Endpoint</span>
+          <select id="apiEndpointSelect">
+            <option value="/v1/chat">/v1/chat</option>
+            <option value="/v1/chat/completions">/v1/chat/completions</option>
+          </select>
+          <small>两个接口都会把问题转发给学校 XipuAI 网页适配器。</small>
+        </label>
+
+        <label class="settings-field">
+          <span>Authorization Bearer Key</span>
+          <input id="apiKeyInput" type="password" autocomplete="off" />
+          <small>默认是演示 Key。正式项目不要把真实密钥放在前端。</small>
+        </label>
+
+        <label class="settings-field">
+          <span>请求格式</span>
+          <select id="requestFormatSelect">
+            <option value="messages">OpenAI-style messages</option>
+            <option value="question">Simple question</option>
+          </select>
+          <small>messages 格式更适合后续兼容 OpenAI-style 客户端。</small>
+        </label>
+      </div>
+
+      <div class="settings-preview-wrap">
+        <div class="preview-header">
+          <span>当前请求预览</span>
+          <button class="text-button" id="copyPreviewButton" type="button">复制 JSON</button>
+        </div>
+        <pre class="request-preview" id="requestPreview"></pre>
+      </div>
+
+      <div class="modal-actions">
+        <button class="secondary-button" id="resetSettingsButton" type="button">恢复默认</button>
+        <button class="secondary-button" id="testApiButton" type="button">测试 API</button>
+        <button class="primary-button" id="saveSettingsButton" type="button">保存设置</button>
+      </div>
+
+      <p class="settings-warning">安全说明：这个设置页只适合课程项目和本地演示。真实线上系统应使用后端登录态、服务端密钥和权限控制，不应把真实密钥交给浏览器保存。</p>
+    </section>
   </div>
 
   <script src="/static/app.js"></script>
