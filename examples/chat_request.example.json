@@ -1,5 +1,5 @@
 {
-  "model": "school-web-gpt",
+  "model": "default",
   "reasoning_effort": "minimal",
   "messages": [
     {

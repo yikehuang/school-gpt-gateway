@@ -101,14 +101,14 @@
       <section class="settings-section">
         <div class="settings-section-header">
           <h3>中转站配置</h3>
-          <p>选择默认 AI 模型和思考方法，保存后会同步到顶部快捷栏和 API 请求预览。</p>
+          <p>选择默认 AI 模型和思考方法，外部平台统一传 model=default，由中转站决定真实学校模型。</p>
         </div>
 
         <div class="settings-grid">
           <label class="settings-field">
             <span>AI 种类 / 模型</span>
             <select id="gatewayModelSelect"></select>
-            <small>模型列表会从学校 XipuAI 后台动态同步。</small>
+            <small>模型列表会从学校 XipuAI 后台动态同步；WeFlow 里统一填写 default。</small>
           </label>
 
           <label class="settings-field">

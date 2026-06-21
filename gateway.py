@@ -32,6 +32,15 @@ VALID_USER_KEYS = {
     }
 }
 
+CLIENT_MODEL_OPTIONS = [
+    {
+        "id": "default",
+        "name": "Default",
+        "description": "客户端统一填写 default；后端强制使用中转站保存的默认模型",
+        "client_only": True
+    },
+]
+
 BASE_MODEL_OPTIONS = [
     {
         "id": "auto",
@@ -68,7 +77,7 @@ LEGACY_MODEL_OPTIONS = [
     },
 ]
 
-MODEL_OPTIONS = BASE_MODEL_OPTIONS + LEGACY_MODEL_OPTIONS
+MODEL_OPTIONS = CLIENT_MODEL_OPTIONS + BASE_MODEL_OPTIONS + LEGACY_MODEL_OPTIONS
 THINKING_OPTIONS = [
     {
         "id": "minimal",
@@ -242,9 +251,23 @@ def normalize_model(model_id: Optional[str], default_model: Optional[str] = None
     return requested_model, runtime_model
 
 
+def resolve_gateway_model(client_model: Optional[str], gateway_config: Dict[str, Any]) -> Tuple[str, str, str]:
+    """Return (client_model, configured_model, runtime_model).
+
+    API clients can send any model name, but execution always follows the
+    server-side gateway default. This keeps WeFlow and similar tools on a
+    stable `default` model while the real upstream model is controlled here.
+    """
+    normalized_client_model = normalize_model_value(client_model, "default")
+    configured_model, runtime_model = normalize_model(None, gateway_config.get("model"))
+    return normalized_client_model, configured_model, runtime_model
+
+
 def get_model_name(model_id: str) -> str:
     if model_id in MODEL_NAME_CACHE:
         return MODEL_NAME_CACHE[model_id]
+    if model_id == "default":
+        return "Default"
     if model_id == "auto":
         return "Auto"
     if model_id == "school-web-gpt":
@@ -296,9 +319,9 @@ async def get_model_options() -> List[Dict[str, Any]]:
         school_models = []
 
     if school_models:
-        return merge_model_options(BASE_MODEL_OPTIONS, school_models)
+        return merge_model_options(CLIENT_MODEL_OPTIONS, BASE_MODEL_OPTIONS, school_models)
 
-    return merge_model_options(BASE_MODEL_OPTIONS, LEGACY_MODEL_OPTIONS)
+    return merge_model_options(CLIENT_MODEL_OPTIONS, BASE_MODEL_OPTIONS, LEGACY_MODEL_OPTIONS)
 
 
 def extract_question(request: ChatRequest) -> str:
@@ -332,32 +355,16 @@ def authenticate_user(authorization: str) -> Dict[str, Any]:
 async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[str, Any]:
     question = extract_question(request)
     gateway_config = load_gateway_config()
-    requested_model, runtime_model = normalize_model(request.model, gateway_config.get("model"))
+    client_model, requested_model, runtime_model = resolve_gateway_model(request.model, gateway_config)
     thinking = normalize_thinking(request, gateway_config.get("thinking"))
-    fallback_model_used = False
+    gateway_model_forced = client_model != requested_model
 
     start_time = time.time()
 
     try:
         answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking)
     except Exception as exc:
-        default_requested_model, default_runtime_model = normalize_model(None, gateway_config.get("model"))
-        can_retry_with_default = (
-            request.model
-            and runtime_model != default_runtime_model
-            and is_model_not_found_error(exc)
-        )
-
-        if not can_retry_with_default:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-        try:
-            requested_model = default_requested_model
-            runtime_model = default_runtime_model
-            fallback_model_used = True
-            answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking)
-        except Exception as fallback_exc:
-            raise HTTPException(status_code=502, detail=str(fallback_exc)) from fallback_exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     input_tokens = estimate_tokens(question)
     output_tokens = estimate_tokens(answer)
@@ -366,12 +373,14 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
 
     log = {
         "user_id": user["user_id"],
+        "client_model": client_model,
         "requested_model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
         "thinking": thinking,
         "thinking_name": get_thinking_name(thinking),
-        "fallback_model_used": fallback_model_used,
+        "gateway_model_forced": gateway_model_forced,
+        "fallback_model_used": False,
         "question_length": len(question),
         "answer_length": len(answer),
         "input_tokens": input_tokens,
@@ -385,10 +394,12 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
 
     return {
         "object": "chat.completion",
+        "client_model": client_model,
         "model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
-        "fallback_model_used": fallback_model_used,
+        "gateway_model_forced": gateway_model_forced,
+        "fallback_model_used": False,
         "thinking": thinking,
         "thinking_name": get_thinking_name(thinking),
         "answer": answer,
@@ -479,8 +490,10 @@ async def chat_completions(
         "id": f"xjgpt-{created}",
         "object": "chat.completion",
         "created": created,
+        "client_model": result.get("client_model", "default"),
         "model": result["model"],
         "runtime_model": result["runtime_model"],
+        "gateway_model_forced": result.get("gateway_model_forced", True),
         "fallback_model_used": result.get("fallback_model_used", False),
         "thinking": result["thinking"],
         "reasoning_effort": result["thinking"],

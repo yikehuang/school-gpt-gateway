@@ -31,6 +31,7 @@ const STORAGE_KEY = "xjgpt-conversations";
 const SETTINGS_STORAGE = "xjgpt-api-settings";
 const MODEL_STORAGE = "xjgpt-model";
 const THINKING_STORAGE = "xjgpt-thinking";
+const CLIENT_MODEL_ID = "default";
 
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "",
@@ -127,6 +128,7 @@ function renderModelOptions(models, selectedModel) {
   modelSelect.innerHTML = "";
 
   models.forEach(model => {
+    if (model?.client_only) return;
     if (!model?.id || seen.has(model.id)) return;
     seen.add(model.id);
 
@@ -340,17 +342,18 @@ function applyGatewayConfigFromForm() {
 
 function buildChatPayload(question, model, thinking = getSelectedThinking()) {
   const format = apiSettings.requestFormat || "messages";
+  const clientModel = CLIENT_MODEL_ID;
 
   if (format === "question") {
     return {
       question,
-      model,
+      model: clientModel,
       thinking
     };
   }
 
   return {
-    model,
+    model: clientModel,
     thinking,
     reasoning_effort: thinking,
     messages: [
@@ -628,6 +631,15 @@ function openSettings() {
   gatewayModelSelect.focus();
 }
 
+async function saveGatewayConfigShortcut() {
+  try {
+    await saveGatewayConfigToBackend();
+    setStatus("Gateway default saved");
+  } catch {
+    setStatus("Save failed", "error");
+  }
+}
+
 function closeSettings() {
   settingsModal.classList.remove("open");
   settingsModal.setAttribute("aria-hidden", "true");
@@ -763,12 +775,14 @@ modelSelect.addEventListener("change", () => {
   localStorage.setItem(MODEL_STORAGE, modelSelect.value);
   syncGatewayConfigForm();
   renderRequestPreview();
+  saveGatewayConfigShortcut();
 });
 
 thinkingSelect.addEventListener("change", () => {
   localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
   syncGatewayConfigForm();
   renderRequestPreview();
+  saveGatewayConfigShortcut();
 });
 
 settingsModal.addEventListener("click", event => {
