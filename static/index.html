@@ -26,9 +26,8 @@
       <div class="conversation-list" id="conversationList"></div>
 
       <div class="sidebar-footer">
-        <label class="api-key-label" for="apiKeyInput">API Key</label>
-        <input id="apiKeyInput" class="api-key-input" value="sk-student-demo-001" />
-        <p class="footer-note">本地演示密钥。正式项目应由后端生成用户密钥。</p>
+        <input id="apiKeyInput" class="api-key-input" type="hidden" value="sk-student-demo-001" />
+        <p class="footer-note">演示 API Key 已在界面中隐藏。正式项目应由后端生成并校验用户密钥。</p>
       </div>
     </aside>
 
@@ -44,6 +43,7 @@
             <span>模型</span>
             <select id="modelSelect" class="model-select">
               <option value="auto">Auto</option>
+              <option value="school-web-gpt">School Web GPT</option>
               <option value="gpt-5.4">GPT-5.4</option>
               <option value="deepseek-r1">DeepSeek-R1</option>
               <option value="deepseek-v3">DeepSeek-V3</option>
@@ -58,11 +58,11 @@
         <div class="welcome-card" id="welcomeCard">
           <div class="welcome-logo">XJ</div>
           <h1>XJGPT</h1>
-          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。你可以在右上角选择模型，中转站会把模型 id 一起传给后端。</p>
+          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。前端会把输入内容转换为请求，由后端兼容普通 question 格式和 OpenAI-style messages 格式。</p>
           <div class="suggestion-grid">
+            <button class="suggestion">请只回复两个字：普通</button>
             <button class="suggestion">请解释什么是 AI 中转站</button>
             <button class="suggestion">How to book rooms?</button>
-            <button class="suggestion">帮我总结 XJGPT 项目架构</button>
             <button class="suggestion">What is token estimation?</button>
           </div>
         </div>
