@@ -26,6 +26,7 @@ dependencies = [
   "uvicorn[standard]>=0.27.0",
   "playwright>=1.40.0",
   "pydantic>=2.0.0",
+  "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
@@ -38,7 +39,7 @@ xjgpt-gateway = "xjgpt_gateway.cli:main"
 xjgpt-login = "xjgpt_gateway.login:main"
 
 [tool.setuptools]
-py-modules = ["gateway", "school_gpt_adapter", "login_once"]
+py-modules = ["gateway", "adapter_router", "school_gpt_adapter", "school_gpt_cookie_adapter", "login_once"]
 packages = ["xjgpt_gateway"]
 
 [tool.setuptools.package-data]
