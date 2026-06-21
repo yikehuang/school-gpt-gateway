@@ -89,6 +89,33 @@ playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
 
 XJGPT 前端右上角已经加入模型选择框和思考程度选择框。前端会把模型 id 与思考程度一起发送给 `/v1/chat`。
 
+设置页中的“中转站配置”会保存到后端本地文件 `gateway_config.local.json`。这个文件被 `.gitignore` 忽略，不会上传 GitHub。外部客户端没有传 `model`、`thinking` 或 `reasoning_effort` 时，后端会自动使用这里保存的默认模型和默认思考方法。
+
+读取当前后端默认配置：
+
+```bash
+curl http://127.0.0.1:8000/v1/gateway-config
+```
+
+修改当前后端默认配置：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/gateway-config \
+  -H "Authorization: Bearer sk-student-demo-001" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"gpt-5.5\",\"thinking\":\"medium\"}"
+```
+
+WeFlow 等外部工具可以只配置中转站地址和 Key，然后让中转站使用默认模型/思考：
+
+```text
+API Base URL: http://127.0.0.1:8000/v1
+API Key:      sk-student-demo-001
+Model:        使用中转站里保存的真实模型名，例如 gpt-5.5 或 gpt-5.4
+```
+
+如果外部工具允许自定义请求体，可以省略 `thinking` / `reasoning_effort`；如果外部工具必须填写模型名，请尽量填写学校模型列表里的真实模型 id。若外部工具仍然发送了不存在的模型名，例如 `gpt-4o-mini`，后端会在上游提示找不到模型时自动回退到中转站默认模型重试一次。
+
 前端当前使用 OpenAI-style `messages` 请求体：
 
 ```json

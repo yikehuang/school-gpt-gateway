@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -12,6 +13,11 @@ from school_gpt_adapter import ask_school_gpt, list_school_gpt_models, MODEL_LAB
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+GATEWAY_CONFIG_FILE = BASE_DIR / "gateway_config.local.json"
+DEFAULT_GATEWAY_CONFIG = {
+    "model": "auto",
+    "thinking": "minimal"
+}
 
 app = FastAPI(title="XJGPT School Web GPT Gateway")
 
@@ -129,7 +135,14 @@ class ChatRequest(BaseModel):
     # OpenAI-style reasoning effort compatibility.
     reasoning_effort: Optional[str] = None
     reasoning: Optional[Dict[str, Any]] = None
-    model: str = "auto"
+    model: Optional[str] = None
+
+
+class GatewayConfigRequest(BaseModel):
+    model: Optional[str] = None
+    thinking: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+    reasoning: Optional[Dict[str, Any]] = None
 
 
 def estimate_tokens(text: str) -> int:
@@ -141,9 +154,89 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 2)
 
 
-def normalize_model(model_id: str) -> Tuple[str, str]:
+def normalize_model_value(model_id: Optional[Any], default_model: str = "auto") -> str:
+    raw = model_id if model_id is not None else default_model
+    value = str(raw or default_model).strip()
+    return value or default_model
+
+
+def normalize_thinking_value(raw: Optional[Any], default_thinking: str = "minimal") -> str:
+    value = raw
+    if value is None or str(value).strip() == "":
+        value = default_thinking
+
+    key = str(value or "minimal").strip().lower()
+    thinking = THINKING_ALIASES.get(key)
+
+    if thinking:
+        return thinking
+
+    allowed = ", ".join(option["id"] for option in THINKING_OPTIONS)
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported thinking value: {raw}. Use one of: {allowed}."
+    )
+
+
+def load_gateway_config() -> Dict[str, Any]:
+    config = dict(DEFAULT_GATEWAY_CONFIG)
+
+    if GATEWAY_CONFIG_FILE.exists():
+        try:
+            with GATEWAY_CONFIG_FILE.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            data = {}
+
+        if isinstance(data, dict):
+            config.update({
+                "model": normalize_model_value(data.get("model"), config["model"]),
+                "thinking": config["thinking"]
+            })
+
+            try:
+                config["thinking"] = normalize_thinking_value(data.get("thinking"), config["thinking"])
+            except HTTPException:
+                config["thinking"] = DEFAULT_GATEWAY_CONFIG["thinking"]
+
+    return config
+
+
+def save_gateway_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    clean_config = {
+        "model": normalize_model_value(config.get("model"), DEFAULT_GATEWAY_CONFIG["model"]),
+        "thinking": normalize_thinking_value(config.get("thinking"), DEFAULT_GATEWAY_CONFIG["thinking"]),
+        "updated_at": int(time.time())
+    }
+
+    GATEWAY_CONFIG_FILE.write_text(
+        json.dumps(clean_config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8"
+    )
+    return clean_config
+
+
+def config_response(config: Dict[str, Any]) -> Dict[str, Any]:
+    requested_model, runtime_model = normalize_model(config.get("model"))
+    thinking = normalize_thinking_value(config.get("thinking"), DEFAULT_GATEWAY_CONFIG["thinking"])
+
+    return {
+        "object": "gateway.config",
+        "data": {
+            "model": requested_model,
+            "runtime_model": runtime_model,
+            "model_name": get_model_name(requested_model),
+            "thinking": thinking,
+            "thinking_name": get_thinking_name(thinking),
+            "config_file": GATEWAY_CONFIG_FILE.name
+        }
+    }
+
+
+def normalize_model(model_id: Optional[str], default_model: Optional[str] = None) -> Tuple[str, str]:
     """Return (requested_model, runtime_model)."""
-    requested_model = (model_id or "auto").strip() or "auto"
+    fallback_model = normalize_model_value(default_model, DEFAULT_GATEWAY_CONFIG["model"])
+    requested_model = normalize_model_value(model_id, fallback_model)
     runtime_model = MODEL_ALIASES.get(requested_model, requested_model)
 
     return requested_model, runtime_model
@@ -164,23 +257,18 @@ def get_thinking_name(thinking: str) -> str:
     return THINKING_NAME_CACHE.get(thinking, thinking)
 
 
-def normalize_thinking(request: ChatRequest) -> str:
+def normalize_thinking(request: ChatRequest, default_thinking: Optional[str] = None) -> str:
     raw = request.thinking or request.reasoning_effort
 
     if not raw and isinstance(request.reasoning, dict):
         raw = request.reasoning.get("effort")
 
-    key = str(raw or "minimal").strip().lower()
-    thinking = THINKING_ALIASES.get(key)
+    return normalize_thinking_value(raw, default_thinking or DEFAULT_GATEWAY_CONFIG["thinking"])
 
-    if thinking:
-        return thinking
 
-    allowed = ", ".join(option["id"] for option in THINKING_OPTIONS)
-    raise HTTPException(
-        status_code=400,
-        detail=f"Unsupported thinking value: {raw}. Use one of: {allowed}."
-    )
+def is_model_not_found_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "没有找到模型" in message or ("model" in message and "not found" in message)
 
 
 def merge_model_options(*groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -243,15 +331,33 @@ def authenticate_user(authorization: str) -> Dict[str, Any]:
 
 async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[str, Any]:
     question = extract_question(request)
-    requested_model, runtime_model = normalize_model(request.model)
-    thinking = normalize_thinking(request)
+    gateway_config = load_gateway_config()
+    requested_model, runtime_model = normalize_model(request.model, gateway_config.get("model"))
+    thinking = normalize_thinking(request, gateway_config.get("thinking"))
+    fallback_model_used = False
 
     start_time = time.time()
 
     try:
         answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        default_requested_model, default_runtime_model = normalize_model(None, gateway_config.get("model"))
+        can_retry_with_default = (
+            request.model
+            and runtime_model != default_runtime_model
+            and is_model_not_found_error(exc)
+        )
+
+        if not can_retry_with_default:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        try:
+            requested_model = default_requested_model
+            runtime_model = default_runtime_model
+            fallback_model_used = True
+            answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking)
+        except Exception as fallback_exc:
+            raise HTTPException(status_code=502, detail=str(fallback_exc)) from fallback_exc
 
     input_tokens = estimate_tokens(question)
     output_tokens = estimate_tokens(answer)
@@ -265,6 +371,7 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
         "model_name": get_model_name(requested_model),
         "thinking": thinking,
         "thinking_name": get_thinking_name(thinking),
+        "fallback_model_used": fallback_model_used,
         "question_length": len(question),
         "answer_length": len(answer),
         "input_tokens": input_tokens,
@@ -281,6 +388,7 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
         "model": requested_model,
         "runtime_model": runtime_model,
         "model_name": get_model_name(requested_model),
+        "fallback_model_used": fallback_model_used,
         "thinking": thinking,
         "thinking_name": get_thinking_name(thinking),
         "answer": answer,
@@ -317,6 +425,31 @@ def list_thinking_options():
     }
 
 
+@app.get("/v1/gateway-config")
+def get_gateway_config():
+    return config_response(load_gateway_config())
+
+
+@app.post("/v1/gateway-config")
+def update_gateway_config(
+    request: GatewayConfigRequest,
+    authorization: str = Header(default="")
+):
+    authenticate_user(authorization)
+    current = load_gateway_config()
+
+    raw_thinking = request.thinking or request.reasoning_effort
+    if not raw_thinking and isinstance(request.reasoning, dict):
+        raw_thinking = request.reasoning.get("effort")
+
+    config = save_gateway_config({
+        "model": normalize_model_value(request.model, current.get("model", DEFAULT_GATEWAY_CONFIG["model"])),
+        "thinking": normalize_thinking_value(raw_thinking, current.get("thinking", DEFAULT_GATEWAY_CONFIG["thinking"]))
+    })
+
+    return config_response(config)
+
+
 @app.post("/v1/chat")
 async def chat(
     request: ChatRequest,
@@ -348,6 +481,7 @@ async def chat_completions(
         "created": created,
         "model": result["model"],
         "runtime_model": result["runtime_model"],
+        "fallback_model_used": result.get("fallback_model_used", False),
         "thinking": result["thinking"],
         "reasoning_effort": result["thinking"],
         "thinking_name": result["thinking_name"],

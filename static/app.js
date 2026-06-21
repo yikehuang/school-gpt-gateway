@@ -104,6 +104,23 @@ function buildModelsUrl() {
   return baseUrl ? `${baseUrl}/v1/models` : "/v1/models";
 }
 
+function buildGatewayConfigUrl() {
+  const baseUrl = (apiSettings.apiBaseUrl || "").trim().replace(/\/$/, "");
+  return baseUrl ? `${baseUrl}/v1/gateway-config` : "/v1/gateway-config";
+}
+
+function ensureSelectOption(selectEl, value, label = value) {
+  if (!selectEl || !value) return;
+
+  const hasOption = Array.from(selectEl.options).some(option => option.value === value);
+  if (!hasOption) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    selectEl.appendChild(option);
+  }
+}
+
 function renderModelOptions(models, selectedModel) {
   const previousValue = selectedModel || modelSelect.value || "auto";
   const seen = new Set();
@@ -150,6 +167,71 @@ async function loadModelOptions() {
   } catch {
     renderModelOptions(FALLBACK_MODELS, selectedModel);
   }
+}
+
+function applyGatewayConfigData(config) {
+  if (!config || typeof config !== "object") return;
+
+  if (config.model) {
+    ensureSelectOption(modelSelect, config.model, config.model_name || config.model);
+    modelSelect.value = config.model;
+    localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  }
+
+  if (config.thinking && THINKING_OPTIONS[config.thinking]) {
+    thinkingSelect.value = config.thinking;
+    localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
+  }
+
+  syncGatewayConfigForm();
+  renderRequestPreview();
+}
+
+async function loadGatewayConfig() {
+  try {
+    const response = await fetch(buildGatewayConfigUrl());
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || !data.data) {
+      throw new Error(data.detail || "中转站配置读取失败");
+    }
+
+    applyGatewayConfigData(data.data);
+  } catch {
+    syncGatewayConfigForm();
+  }
+}
+
+async function saveGatewayConfigToBackend() {
+  const apiKey = apiSettings.apiKey.trim();
+
+  if (!apiKey) {
+    throw new Error("API Key 缺失，无法保存后端默认配置。");
+  }
+
+  const payload = {
+    model: modelSelect.value,
+    thinking: getSelectedThinking(),
+    reasoning_effort: getSelectedThinking()
+  };
+
+  const response = await fetch(buildGatewayConfigUrl(), {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.data) {
+    throw new Error(data.detail || data.error?.message || "后端默认配置保存失败");
+  }
+
+  applyGatewayConfigData(data.data);
+  return data.data;
 }
 
 function loadConversations() {
@@ -551,16 +633,30 @@ function closeSettings() {
   settingsModal.setAttribute("aria-hidden", "true");
 }
 
-function saveSettingsFromModal() {
+async function saveSettingsFromModal() {
   applyGatewayConfigFromForm();
   saveApiSettings(readSettingsFromForm());
-  loadModelOptions();
   renderRequestPreview();
-  setStatus("Settings saved");
-  closeSettings();
+  saveSettingsButton.disabled = true;
+  saveSettingsButton.textContent = "保存中...";
+  setStatus("Saving settings", "loading");
+
+  try {
+    await saveGatewayConfigToBackend();
+    await loadModelOptions();
+    renderRequestPreview();
+    setStatus("Settings saved");
+    closeSettings();
+  } catch (error) {
+    setStatus("Save failed", "error");
+    alert(`保存失败：${error.message}`);
+  } finally {
+    saveSettingsButton.disabled = false;
+    saveSettingsButton.textContent = "保存设置";
+  }
 }
 
-function resetSettings() {
+async function resetSettings() {
   saveApiSettings({ ...DEFAULT_SETTINGS });
   applySettingsToForm();
   modelSelect.value = "auto";
@@ -568,8 +664,19 @@ function resetSettings() {
   localStorage.setItem(MODEL_STORAGE, modelSelect.value);
   localStorage.setItem(THINKING_STORAGE, thinkingSelect.value);
   syncGatewayConfigForm();
-  loadModelOptions();
-  setStatus("Settings reset");
+  resetSettingsButton.disabled = true;
+  setStatus("Resetting settings", "loading");
+
+  try {
+    await saveGatewayConfigToBackend();
+    await loadModelOptions();
+    setStatus("Settings reset");
+  } catch (error) {
+    setStatus("Reset failed", "error");
+    alert(`恢复默认失败：${error.message}`);
+  } finally {
+    resetSettingsButton.disabled = false;
+  }
 }
 
 async function testApiFromSettings() {
@@ -581,6 +688,7 @@ async function testApiFromSettings() {
   setStatus("Testing API", "loading");
 
   try {
+    await saveGatewayConfigToBackend();
     const data = await callConfiguredApi("请只回复两个字：成功", modelSelect.value, getSelectedThinking());
     const answer = parseAssistantAnswer(data);
     setStatus("API OK");
@@ -677,6 +785,6 @@ document.addEventListener("keydown", event => {
 
 loadThinkingSelection();
 applySettingsToForm();
-loadModelOptions();
+loadModelOptions().then(loadGatewayConfig);
 render();
 resizeTextarea();
