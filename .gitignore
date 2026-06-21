@@ -11,5 +11,10 @@ env/
 # Playwright login state - DO NOT upload
 school_gpt_state.json
 
+# Local private JSON payloads
+*.local.json
+request.json
+private_request.json
+
 # Logs
 *.log
