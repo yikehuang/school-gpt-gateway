@@ -1,0 +1,9 @@
+{
+  "model": "school-web-gpt",
+  "messages": [
+    {
+      "content": "请只回复两个字：普通",
+      "role": "user"
+    }
+  ]
+}
