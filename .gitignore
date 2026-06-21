@@ -10,6 +10,7 @@ dist/
 
 # Environment variables
 .env
+.*.local
 
 # Playwright login state - DO NOT upload
 school_gpt_state.json
@@ -18,6 +19,9 @@ school_gpt_state.json
 *.local.json
 request.json
 private_request.json
+
+# Local discovery reports
+local_discovery/
 
 # Release bundles
 release/
