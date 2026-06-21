@@ -37,6 +37,7 @@ dev = [
 [project.scripts]
 xjgpt-gateway = "xjgpt_gateway.cli:main"
 xjgpt-login = "xjgpt_gateway.login:main"
+xjgpt-discover-endpoint = "xjgpt_gateway.discover:main"
 
 [tool.setuptools]
 py-modules = ["gateway", "adapter_router", "school_gpt_adapter", "school_gpt_cookie_adapter", "login_once"]
