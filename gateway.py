@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from school_gpt_adapter import ask_school_gpt, MODEL_LABELS
+from school_gpt_adapter import ask_school_gpt, list_school_gpt_models, MODEL_LABELS
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -26,7 +26,7 @@ VALID_USER_KEYS = {
     }
 }
 
-MODEL_OPTIONS = [
+BASE_MODEL_OPTIONS = [
     {
         "id": "auto",
         "name": "Auto",
@@ -37,6 +37,9 @@ MODEL_OPTIONS = [
         "name": "School Web GPT",
         "description": "兼容 JSON 示例中的模型名，内部等同于 auto"
     },
+]
+
+LEGACY_MODEL_OPTIONS = [
     {
         "id": "gpt-5.4",
         "name": "GPT-5.4",
@@ -59,12 +62,13 @@ MODEL_OPTIONS = [
     },
 ]
 
-SUPPORTED_MODEL_IDS = {model["id"] for model in MODEL_OPTIONS}
+MODEL_OPTIONS = BASE_MODEL_OPTIONS + LEGACY_MODEL_OPTIONS
 MODEL_ALIASES = {
     "school-web-gpt": "auto",
     "xjgpt": "auto",
     "xipuai": "auto"
 }
+MODEL_NAME_CACHE = {model["id"]: model["name"] for model in MODEL_OPTIONS}
 
 USAGE_LOGS = []
 
@@ -93,25 +97,51 @@ def estimate_tokens(text: str) -> int:
 
 def normalize_model(model_id: str) -> Tuple[str, str]:
     """Return (requested_model, runtime_model)."""
-    requested_model = (model_id or "auto").strip()
+    requested_model = (model_id or "auto").strip() or "auto"
     runtime_model = MODEL_ALIASES.get(requested_model, requested_model)
-
-    if requested_model not in SUPPORTED_MODEL_IDS and runtime_model not in SUPPORTED_MODEL_IDS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported model: {requested_model}. Use GET /v1/models to check available models."
-        )
 
     return requested_model, runtime_model
 
 
 def get_model_name(model_id: str) -> str:
+    if model_id in MODEL_NAME_CACHE:
+        return MODEL_NAME_CACHE[model_id]
     if model_id == "auto":
         return "Auto"
     if model_id == "school-web-gpt":
         return "School Web GPT"
     label = MODEL_LABELS.get(model_id)
     return label or model_id
+
+
+def merge_model_options(*groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged = []
+    seen = set()
+
+    for group in groups:
+        for option in group:
+            option_id = option.get("id")
+            if not option_id or option_id in seen:
+                continue
+
+            seen.add(option_id)
+            merged.append(option)
+
+    MODEL_NAME_CACHE.clear()
+    MODEL_NAME_CACHE.update({option["id"]: option.get("name", option["id"]) for option in merged})
+    return merged
+
+
+async def get_model_options() -> List[Dict[str, Any]]:
+    try:
+        school_models = await list_school_gpt_models()
+    except Exception:
+        school_models = []
+
+    if school_models:
+        return merge_model_options(BASE_MODEL_OPTIONS, school_models)
+
+    return merge_model_options(BASE_MODEL_OPTIONS, LEGACY_MODEL_OPTIONS)
 
 
 def extract_question(request: ChatRequest) -> str:
@@ -198,10 +228,10 @@ async def serve_frontend():
 
 
 @app.get("/v1/models")
-def list_models():
+async def list_models():
     return {
         "object": "list",
-        "data": MODEL_OPTIONS
+        "data": await get_model_options()
     }
 
 

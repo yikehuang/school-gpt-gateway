@@ -10,7 +10,9 @@ def main():
         context = browser.new_context()
         page = context.new_page()
 
-        page.goto(SCHOOL_GPT_URL, wait_until="networkidle")
+        # The XipuAI single-page app may keep background requests open, so
+        # wait only until navigation has committed before the user logs in.
+        page.goto(SCHOOL_GPT_URL, wait_until="commit")
 
         print("请在打开的浏览器中手动登录学校 XipuAI。")
         print("登录完成并看到 XipuAI 聊天页面后，回到终端按 Enter。")

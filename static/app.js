@@ -35,6 +35,11 @@ const DEFAULT_SETTINGS = {
   requestFormat: "messages"
 };
 
+const FALLBACK_MODELS = Array.from(modelSelect.options).map(option => ({
+  id: option.value,
+  name: option.textContent
+}));
+
 let conversations = loadConversations();
 let activeConversationId = conversations[0]?.id || createConversation().id;
 let isSending = false;
@@ -81,6 +86,58 @@ function buildApiUrl() {
 
   const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
   return baseUrl ? `${baseUrl}${normalizedEndpoint}` : normalizedEndpoint;
+}
+
+function buildModelsUrl() {
+  const baseUrl = (apiSettings.apiBaseUrl || "").trim().replace(/\/$/, "");
+  return baseUrl ? `${baseUrl}/v1/models` : "/v1/models";
+}
+
+function renderModelOptions(models, selectedModel) {
+  const previousValue = selectedModel || modelSelect.value || "auto";
+  const seen = new Set();
+  modelSelect.innerHTML = "";
+
+  models.forEach(model => {
+    if (!model?.id || seen.has(model.id)) return;
+    seen.add(model.id);
+
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = model.name || model.id;
+
+    if (model.description) {
+      option.title = model.description;
+    }
+
+    modelSelect.appendChild(option);
+  });
+
+  if (seen.has(previousValue)) {
+    modelSelect.value = previousValue;
+  } else if (seen.has("auto")) {
+    modelSelect.value = "auto";
+  }
+
+  localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  renderRequestPreview();
+}
+
+async function loadModelOptions() {
+  const selectedModel = localStorage.getItem(MODEL_STORAGE) || modelSelect.value || "auto";
+
+  try {
+    const response = await fetch(buildModelsUrl());
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || !Array.isArray(data.data)) {
+      throw new Error(data.detail || "模型列表读取失败");
+    }
+
+    renderModelOptions(data.data, selectedModel);
+  } catch {
+    renderModelOptions(FALLBACK_MODELS, selectedModel);
+  }
 }
 
 function loadConversations() {
@@ -409,6 +466,7 @@ function closeSettings() {
 
 function saveSettingsFromModal() {
   saveApiSettings(readSettingsFromForm());
+  loadModelOptions();
   renderRequestPreview();
   setStatus("Settings saved");
   closeSettings();
@@ -417,6 +475,7 @@ function saveSettingsFromModal() {
 function resetSettings() {
   saveApiSettings({ ...DEFAULT_SETTINGS });
   applySettingsToForm();
+  loadModelOptions();
   setStatus("Settings reset");
 }
 
@@ -494,6 +553,11 @@ copyPreviewButton.addEventListener("click", copyPreview);
   input.addEventListener("change", renderRequestPreview);
 });
 
+modelSelect.addEventListener("change", () => {
+  localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+  renderRequestPreview();
+});
+
 settingsModal.addEventListener("click", event => {
   if (event.target === settingsModal) {
     closeSettings();
@@ -507,5 +571,6 @@ document.addEventListener("keydown", event => {
 });
 
 applySettingsToForm();
+loadModelOptions();
 render();
 resizeTextarea();

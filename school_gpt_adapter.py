@@ -1,7 +1,23 @@
+import asyncio
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import httpx
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 # 西交利物浦大学 XipuAI 网页版 GPT
 SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
+SCHOOL_GPT_BASE_URL = "https://xipuai.xjtlu.edu.cn"
+SCHOOL_GPT_STATE_FILE = Path("school_gpt_state.json")
+
+CHAT_CONFIG_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/config?lang=en&sf_request_type=ajax"
+CHAT_SESSION_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/session?lang=en&sf_request_type=ajax"
+CHAT_COMPLETIONS_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/completions?sf_request_type=fetch"
+CHAT_SAVE_SESSION_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/saveSession?sf_request_type=ajax"
+
+HTTP_TIMEOUT = httpx.Timeout(90.0, connect=20.0, read=90.0)
 
 # 前端和 API 可传入这些 model id。label 必须尽量匹配学校网页下拉框里的文字。
 # 如果学校页面里的模型名称和这里不同，只需要改 label，不需要改前端接口。
@@ -11,6 +27,13 @@ MODEL_LABELS = {
     "deepseek-r1": "DeepSeek-R1",
     "deepseek-v3": "DeepSeek-V3",
     "qwen-max": "Qwen-Max",
+}
+
+DIRECT_MODEL_CANDIDATES = {
+    "gpt-5.4": ["gpt-5.4", "GPT-5.4"],
+    "deepseek-r1": ["deepseek-r1", "DeepSeek-R1", "DeepseekR1联网"],
+    "deepseek-v3": ["deepseek-v3", "DeepSeek-V3", "DeepSeek-V3.1-W8A8"],
+    "qwen-max": ["qwen-max", "Qwen-Max"],
 }
 
 # XipuAI 聊天输入框候选选择器。
@@ -69,10 +92,357 @@ ANSWER_SELECTORS = [
 ]
 
 
+class DirectAdapterError(RuntimeError):
+    """Raised when direct XipuAI HTTP access cannot be prepared or parsed."""
+
+
+class DirectBackendError(RuntimeError):
+    """Raised when XipuAI's backend returns a valid error response."""
+
+
 def get_model_label(model: str | None) -> str | None:
     """把 API 传入的 model id 转为学校网页中显示的模型名称。"""
     model_id = (model or "auto").strip()
     return MODEL_LABELS.get(model_id, model_id)
+
+
+def _load_storage_state() -> dict[str, Any]:
+    if not SCHOOL_GPT_STATE_FILE.exists():
+        raise DirectAdapterError("没有找到 school_gpt_state.json，请先运行 login_once.py 保存登录状态。")
+
+    try:
+        return json.loads(SCHOOL_GPT_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise DirectAdapterError("school_gpt_state.json 读取失败，请重新运行 login_once.py。") from exc
+
+
+def _extract_jm_token(state: dict[str, Any]) -> str:
+    for origin in state.get("origins", []):
+        if origin.get("origin") != SCHOOL_GPT_BASE_URL:
+            continue
+
+        for item in origin.get("localStorage", []):
+            value = item.get("value", "")
+
+            match = re.search("token\\xa8\\xa8([^\\xa8]+)\\xa8", value)
+            if match:
+                return match.group(1)
+
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                parsed = None
+
+            if isinstance(parsed, dict) and parsed.get("token"):
+                return str(parsed["token"])
+
+    raise DirectAdapterError("登录状态里没有找到 XipuAI jm-token，请重新运行 login_once.py。")
+
+
+def _build_direct_cookies(state: dict[str, Any]) -> httpx.Cookies:
+    cookies = httpx.Cookies()
+
+    for cookie in state.get("cookies", []):
+        domain = cookie.get("domain")
+        name = cookie.get("name")
+        value = cookie.get("value")
+
+        if not domain or not name or value is None:
+            continue
+
+        if "xjtlu.edu.cn" in domain:
+            cookies.set(name, value, domain=domain, path=cookie.get("path") or "/")
+
+    return cookies
+
+
+def _build_direct_headers(token: str, accept: str = "application/json, text/plain, */*") -> dict[str, str]:
+    return {
+        "accept": accept,
+        "content-type": "application/json",
+        "origin": SCHOOL_GPT_BASE_URL,
+        "referer": SCHOOL_GPT_URL,
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148 Safari/537.36"
+        ),
+        "jm-token": token,
+    }
+
+
+def _build_direct_client(state: dict[str, Any]) -> httpx.AsyncClient:
+    token = _extract_jm_token(state)
+    return httpx.AsyncClient(
+        cookies=_build_direct_cookies(state),
+        headers=_build_direct_headers(token),
+        timeout=HTTP_TIMEOUT,
+        trust_env=False,
+    )
+
+
+def _format_model_option(option: dict[str, Any]) -> dict[str, Any] | None:
+    value = str(option.get("value") or "").strip()
+    label = str(option.get("label") or value).strip()
+
+    if not value:
+        return None
+
+    integral = str(option.get("integral") or "").strip()
+    description_parts = []
+
+    if integral:
+        description_parts.append(integral)
+    else:
+        description_parts.append("Free")
+
+    if option.get("online"):
+        description_parts.append("Online")
+
+    if option.get("thinking"):
+        description_parts.append("Thinking")
+
+    if option.get("multimodal"):
+        description_parts.append("Multimodal")
+
+    if option.get("plugin"):
+        description_parts.append("Plugin")
+
+    expired = str(option.get("expired") or "").strip()
+    if expired:
+        description_parts.append(f"Expired: {expired}")
+
+    return {
+        "id": value,
+        "name": label,
+        "description": " · ".join(description_parts),
+        "upstream_value": value,
+        "upstream_label": label,
+        "free": not bool(integral),
+        "online": bool(option.get("online")),
+        "thinking": bool(option.get("thinking")),
+        "multimodal": bool(option.get("multimodal")),
+        "plugin": bool(option.get("plugin")),
+        "integral": integral,
+    }
+
+
+async def list_school_gpt_models() -> list[dict[str, Any]]:
+    """Return all XipuAI models visible to the saved school login state."""
+    state = _load_storage_state()
+
+    try:
+        async with _build_direct_client(state) as client:
+            models = await _get_available_models(client)
+    except httpx.HTTPError as exc:
+        raise DirectAdapterError("XipuAI 模型列表 HTTP 请求失败。") from exc
+
+    options = []
+    seen = set()
+
+    for model in models:
+        option = _format_model_option(model)
+        if not option or option["id"] in seen:
+            continue
+
+        seen.add(option["id"])
+        options.append(option)
+
+    return options
+
+
+def _ensure_backend_success(payload: dict[str, Any], action: str) -> Any:
+    if payload.get("code") != 0:
+        detail = payload.get("msg") or payload.get("data") or payload
+        raise DirectBackendError(f"XipuAI {action} 失败：{detail}")
+
+    return payload.get("data")
+
+
+async def _get_latest_session(client: httpx.AsyncClient) -> dict[str, Any]:
+    response = await client.get(CHAT_SESSION_URL)
+
+    if response.status_code != 200:
+        raise DirectAdapterError(f"读取 XipuAI 会话失败，HTTP {response.status_code}。")
+
+    try:
+        sessions = _ensure_backend_success(response.json(), "读取会话")
+    except json.JSONDecodeError as exc:
+        raise DirectAdapterError("XipuAI 会话接口返回了无法解析的 JSON。") from exc
+
+    if not sessions:
+        raise DirectAdapterError("XipuAI 没有可用会话，请先在网页里创建一次 New Chat。")
+
+    return sessions[0]
+
+
+async def _get_available_models(client: httpx.AsyncClient) -> list[dict[str, Any]]:
+    response = await client.get(CHAT_CONFIG_URL)
+
+    if response.status_code != 200:
+        raise DirectAdapterError(f"读取 XipuAI 模型配置失败，HTTP {response.status_code}。")
+
+    try:
+        config = _ensure_backend_success(response.json(), "读取模型配置")
+    except json.JSONDecodeError as exc:
+        raise DirectAdapterError("XipuAI 模型配置接口返回了无法解析的 JSON。") from exc
+
+    models = config.get("models", []) if isinstance(config, dict) else []
+    return [model for model in models if isinstance(model, dict)]
+
+
+async def _resolve_direct_model(client: httpx.AsyncClient, model: str | None) -> str | None:
+    model_id = (model or "auto").strip()
+
+    if model_id == "auto":
+        return None
+
+    candidates = DIRECT_MODEL_CANDIDATES.get(model_id, [model_id, get_model_label(model_id) or model_id])
+    normalized_candidates = [candidate.lower() for candidate in candidates if candidate]
+    models = await _get_available_models(client)
+
+    for option in models:
+        value = str(option.get("value") or "")
+        label = str(option.get("label") or "")
+
+        if value.lower() in normalized_candidates:
+            return value
+
+        if label.lower() in normalized_candidates:
+            return value
+
+    for option in models:
+        value = str(option.get("value") or "")
+        label = str(option.get("label") or "")
+
+        if any(candidate in value.lower() or candidate in label.lower() for candidate in normalized_candidates):
+            return value
+
+    available = ", ".join(str(option.get("label") or option.get("value")) for option in models[:12])
+    raise DirectBackendError(
+        f"XipuAI 当前没有找到模型 {model_id}。可用模型示例：{available}"
+    )
+
+
+def _session_update_payload(session: dict[str, Any], model_value: str) -> dict[str, Any]:
+    return {
+        "lang": "en",
+        "id": session["id"],
+        "name": session.get("name") or "New Chat",
+        "model": model_value,
+        "temperature": session.get("temperature", 0.7),
+        "prompt": session.get("prompt") or "",
+        "icon": session.get("icon") or "",
+        "created": session.get("created") or "",
+        "updated": session.get("updated") or "",
+        "contextCount": session.get("contextCount", 5),
+        "maxToken": session.get("maxToken", 0),
+        "presencePenalty": session.get("presencePenalty", 0),
+        "frequencyPenalty": session.get("frequencyPenalty", 0),
+        "topSort": session.get("topSort", 0),
+    }
+
+
+async def _set_session_model_if_needed(
+    client: httpx.AsyncClient,
+    session: dict[str, Any],
+    model_value: str | None,
+) -> None:
+    if not model_value or session.get("model") == model_value:
+        return
+
+    response = await client.post(CHAT_SAVE_SESSION_URL, json=_session_update_payload(session, model_value))
+
+    if response.status_code != 200:
+        raise DirectAdapterError(f"更新 XipuAI 会话模型失败，HTTP {response.status_code}。")
+
+    try:
+        _ensure_backend_success(response.json(), "更新会话模型")
+    except json.JSONDecodeError as exc:
+        raise DirectAdapterError("XipuAI 模型更新接口返回了无法解析的 JSON。") from exc
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "too fast" in message or "10006" in message or "频繁" in message
+
+
+async def _post_direct_completion(
+    client: httpx.AsyncClient,
+    question: str,
+    session_id: int,
+) -> str:
+    payload = {
+        "text": question,
+        "files": [],
+        "online": 0,
+        "thinking": "minimal",
+        "sessionId": session_id,
+        "responseId": None,
+    }
+
+    headers = dict(client.headers)
+    headers.update(_build_direct_headers(str(client.headers["jm-token"]), accept="*/*"))
+
+    chunks: list[str] = []
+
+    async with client.stream("POST", CHAT_COMPLETIONS_URL, json=payload, headers=headers) as response:
+        if response.status_code != 200:
+            raise DirectAdapterError(f"XipuAI 直连聊天失败，HTTP {response.status_code}。")
+
+        async for line in response.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+
+            raw_data = line.removeprefix("data:").strip()
+
+            if not raw_data or raw_data == "[DONE]":
+                continue
+
+            try:
+                event = json.loads(raw_data)
+            except json.JSONDecodeError:
+                continue
+
+            code = event.get("code", 0)
+            if code != 0:
+                detail = event.get("msg") or event.get("data") or f"code={code}"
+                raise DirectBackendError(f"XipuAI 后台返回错误：{detail}")
+
+            if event.get("type") == "string":
+                chunks.append(str(event.get("data") or ""))
+
+    answer = "".join(chunks).strip()
+
+    if not answer:
+        raise DirectAdapterError("XipuAI 直连接口没有返回文本内容。")
+
+    return answer
+
+
+async def ask_school_gpt_direct(question: str, model: str | None = "auto") -> str:
+    """
+    使用保存下来的学校登录态，直接请求 XipuAI 后台接口。
+
+    该路径只复用用户本人手动登录后保存的 cookie 和 jm-token，不绕过学校认证。
+    """
+    state = _load_storage_state()
+
+    for attempt in range(3):
+        try:
+            async with _build_direct_client(state) as client:
+                session = await _get_latest_session(client)
+                model_value = await _resolve_direct_model(client, model)
+                await _set_session_model_if_needed(client, session, model_value)
+                return await _post_direct_completion(client, question, int(session["id"]))
+        except DirectBackendError as exc:
+            if _is_rate_limit_error(exc) and attempt < 2:
+                await asyncio.sleep(2 + attempt * 3)
+                continue
+            raise
+        except httpx.HTTPError as exc:
+            raise DirectAdapterError("XipuAI 直连 HTTP 请求失败。") from exc
+
+    raise DirectBackendError("XipuAI 请求过于频繁，请稍后再试。")
 
 
 async def _fill_first_available(page, selectors, text: str) -> str:
@@ -101,6 +471,37 @@ async def _click_first_available(page, selectors) -> str:
             continue
 
     raise RuntimeError("没有找到可点击按钮。请使用 playwright codegen 确认页面选择器。")
+
+
+async def _wait_for_chat_ready(page, timeout: int = 45000) -> str:
+    """Wait until the XipuAI SPA has rendered a usable chat input."""
+    deadline = asyncio.get_running_loop().time() + (timeout / 1000)
+
+    while asyncio.get_running_loop().time() < deadline:
+        for selector in CHAT_INPUT_SELECTORS:
+            locator = page.locator(selector).first
+            try:
+                if await locator.is_visible(timeout=500):
+                    return selector
+            except Exception:
+                continue
+
+        await page.wait_for_timeout(500)
+
+    body_preview = ""
+    try:
+        body_preview = (await page.locator("body").inner_text(timeout=3000)).strip()
+    except Exception:
+        pass
+
+    if body_preview:
+        body_preview = body_preview[:300].replace("\n", " | ")
+        raise RuntimeError(
+            "XipuAI 页面已打开，但没有找到聊天输入框。"
+            f"当前页面文本片段：{body_preview}"
+        )
+
+    raise RuntimeError("XipuAI 页面打开后没有渲染聊天界面，请检查登录状态或校园网页是否正常。")
 
 
 async def _select_native_select(page, label: str) -> bool:
@@ -233,7 +634,7 @@ async def _extract_latest_answer(page, question: str) -> str:
     raise RuntimeError("没有读取到 XipuAI 的回答。")
 
 
-async def ask_school_gpt(question: str, model: str | None = "auto") -> str:
+async def ask_school_gpt_browser(question: str, model: str | None = "auto") -> str:
     """
     使用学校授权的 XipuAI 网页作为上游服务。
 
@@ -253,7 +654,10 @@ async def ask_school_gpt(question: str, model: str | None = "auto") -> str:
         page = await context.new_page()
 
         try:
-            await page.goto(SCHOOL_GPT_URL, wait_until="networkidle", timeout=60000)
+            # XipuAI is an SPA and keeps loading/long-polling resources, so
+            # waiting for networkidle can hang even after the chat UI is ready.
+            await page.goto(SCHOOL_GPT_URL, wait_until="commit", timeout=30000)
+            await _wait_for_chat_ready(page)
 
             await _select_model_if_needed(page, model)
             await _fill_first_available(page, CHAT_INPUT_SELECTORS, question)
@@ -278,3 +682,12 @@ async def ask_school_gpt(question: str, model: str | None = "auto") -> str:
 
         finally:
             await browser.close()
+
+
+async def ask_school_gpt(question: str, model: str | None = "auto") -> str:
+    try:
+        return await ask_school_gpt_direct(question, model=model)
+    except DirectBackendError:
+        raise
+    except DirectAdapterError:
+        return await ask_school_gpt_browser(question, model=model)
