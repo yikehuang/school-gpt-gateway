@@ -1,7 +1,7 @@
 from playwright.sync_api import sync_playwright
 
-# 西交利物浦大学 Ehall AI 页面
-SCHOOL_GPT_URL = "https://ehall.xjtlu.edu.cn/default/index.html#/wiseQA"
+# 西交利物浦大学 XipuAI 网页版 GPT
+SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
 
 
 def main():
@@ -12,8 +12,8 @@ def main():
 
         page.goto(SCHOOL_GPT_URL, wait_until="networkidle")
 
-        print("请在打开的浏览器中手动登录学校 Ehall AI。")
-        print("登录完成并看到 Ehall AI 聊天页面后，回到终端按 Enter。")
+        print("请在打开的浏览器中手动登录学校 XipuAI。")
+        print("登录完成并看到 XipuAI 聊天页面后，回到终端按 Enter。")
         input()
 
         context.storage_state(path="school_gpt_state.json")
