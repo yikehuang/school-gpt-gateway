@@ -2,12 +2,15 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build-release:
@@ -42,7 +45,7 @@ jobs:
             dist/*
             release/*.zip
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release from tag
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -50,3 +53,54 @@ jobs:
             dist/*
             release/*.zip
           generate_release_notes: true
+          overwrite_files: true
+
+      - name: Create initial GitHub Release from main
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0
+          target_commitish: main
+          name: XJGPT School Gateway v0.1.0
+          body: |
+            Initial release of XJGPT School Gateway.
+
+            Includes:
+            - ChatGPT-like XJGPT frontend
+            - FastAPI gateway
+            - XipuAI school web adapter
+            - Model selection support
+            - OpenAI-compatible chat completion request format
+            - Release zip and Python package artifacts
+          files: |
+            dist/*
+            release/*.zip
+          generate_release_notes: true
+          overwrite_files: true
+
+  publish-container-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish container package
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/xjgpt-school-gateway"
+          VERSION="0.1.0"
+
+          docker build \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:$VERSION" \
+            .
+
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:$VERSION"
