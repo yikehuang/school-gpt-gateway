@@ -19,7 +19,10 @@ let conversations = loadConversations();
 let activeConversationId = conversations[0]?.id || createConversation().id;
 let isSending = false;
 
-apiKeyInput.value = localStorage.getItem(API_KEY_STORAGE) || apiKeyInput.value;
+const storedApiKey = localStorage.getItem(API_KEY_STORAGE);
+if (storedApiKey) {
+  apiKeyInput.value = storedApiKey;
+}
 apiKeyInput.addEventListener("input", () => {
   localStorage.setItem(API_KEY_STORAGE, apiKeyInput.value.trim());
 });
@@ -193,6 +196,18 @@ function removeTypingMessage() {
   if (typing) typing.remove();
 }
 
+function buildChatPayload(question, model) {
+  return {
+    model,
+    messages: [
+      {
+        role: "user",
+        content: question
+      }
+    ]
+  };
+}
+
 async function sendMessage(question) {
   const apiKey = apiKeyInput.value.trim();
   const model = modelSelect.value;
@@ -200,7 +215,7 @@ async function sendMessage(question) {
 
   if (!apiKey) {
     setStatus("Missing API key", "error");
-    alert("请先填写 API Key。默认演示 Key 是 sk-student-demo-001。 ");
+    alert("后端演示 API Key 缺失。请检查 static/index.html 中的隐藏输入值。 ");
     return;
   }
 
@@ -232,7 +247,7 @@ async function sendMessage(question) {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ question, model })
+      body: JSON.stringify(buildChatPayload(question, model))
     });
 
     const data = await response.json();
