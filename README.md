@@ -9,12 +9,24 @@ school_gpt_gateway/
 ├── gateway.py              # 中转站主程序，同时提供 XJGPT 前端入口
 ├── school_gpt_adapter.py   # 学校网页版 GPT 适配器，包含模型选择逻辑
 ├── login_once.py           # 手动登录并保存学校 GPT 登录状态
+├── xjgpt_gateway/          # Python package CLI 入口
 ├── examples/
 │   └── chat_request.example.json  # OpenAI-style 测试 JSON
 ├── static/
 │   ├── index.html          # XJGPT 前端页面
 │   ├── styles.css          # XJGPT 页面样式
 │   └── app.js              # XJGPT 前端交互逻辑
+├── docs/
+│   ├── PACKAGING.md        # 打包说明
+│   └── RELEASE.md          # Release 发布说明
+├── scripts/
+│   └── build_release.py    # 本地 release zip 构建脚本
+├── .github/workflows/
+│   └── release.yml         # GitHub tag release workflow
+├── pyproject.toml          # Python package 配置
+├── MANIFEST.in             # source distribution 文件清单
+├── VERSION
+├── CHANGELOG.md
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -33,6 +45,20 @@ school_gpt_gateway/
 ```bash
 pip install -r requirements.txt
 playwright install chromium
+```
+
+也可以用可编辑 package 方式安装：
+
+```bash
+pip install -e .
+playwright install chromium
+```
+
+安装后可以使用命令行入口：
+
+```bash
+xjgpt-login
+xjgpt-gateway --host 127.0.0.1 --port 8000
 ```
 
 ## 4. School GPT URL
@@ -119,12 +145,24 @@ MODEL_LABELS = {
 python login_once.py
 ```
 
+或使用 package 命令：
+
+```bash
+xjgpt-login
+```
+
 浏览器打开后，手动登录学校 XipuAI。登录完成并进入聊天页面后，回到终端按 Enter。程序会保存 `school_gpt_state.json`。
 
 ## 7. Start Gateway and Frontend
 
 ```bash
 uvicorn gateway:app --host 0.0.0.0 --port 8000
+```
+
+或使用 package 命令：
+
+```bash
+xjgpt-gateway --host 127.0.0.1 --port 8000
 ```
 
 启动后，在浏览器打开：
@@ -185,10 +223,66 @@ curl http://127.0.0.1:8000/admin/logs \
 
 日志会记录 `requested_model`、`runtime_model` 和 `model_name`，用于区分不同模型的调用情况。
 
-## 10. XJGPT Frontend
+## 10. Packaging
+
+项目已经补齐 Python package 配置。核心文件包括：
+
+```text
+pyproject.toml
+MANIFEST.in
+xjgpt_gateway/
+VERSION
+CHANGELOG.md
+```
+
+本地构建 Python package：
+
+```bash
+python -m pip install --upgrade build
+python -m build
+```
+
+输出文件位于：
+
+```text
+dist/
+```
+
+构建课程提交或演示用 release zip：
+
+```bash
+python scripts/build_release.py
+```
+
+输出文件位于：
+
+```text
+release/xjgpt-school-gateway-0.1.0.zip
+```
+
+更详细的打包说明见 `docs/PACKAGING.md`。
+
+## 11. Release
+
+仓库已经补齐 GitHub Actions release workflow：
+
+```text
+.github/workflows/release.yml
+```
+
+推送 `v*` 标签后，GitHub 会自动构建 wheel、source distribution 和 release zip，并上传到 GitHub Release：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+更详细的发布说明见 `docs/RELEASE.md`。
+
+## 12. XJGPT Frontend
 
 XJGPT 前端位于 `static/` 目录。界面包含侧边栏、新建会话、历史会话、隐藏演示 API Key、模型选择框、消息区、推荐问题和底部输入框。前端会调用同源接口 `/v1/chat`，并把用户输入转换成 OpenAI-style `messages` 请求体。中转站再通过 Web Adapter 访问学校 XipuAI 网页，读取回答并返回给前端。
 
-## 11. Competition Explanation
+## 13. Competition Explanation
 
 本项目面向学校网页版 GPT 设计中转站和 XJGPT 前端。由于学校 GPT 主要以网页形式提供服务，系统使用 Web Adapter 把网页交互封装为统一 API。用户请求进入中转站后，系统先校验 API Key，再根据前端选择的模型 id 尝试切换学校 XipuAI 网页模型，随后提交问题并读取回答。系统同时记录模型、token 估算、响应耗时和调用状态，展示了校内模型资源统一接入、权限管理、模型路由和用量治理能力。
