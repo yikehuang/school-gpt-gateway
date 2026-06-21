@@ -1,24 +1,39 @@
 from playwright.sync_api import sync_playwright
 
-# 西交利物浦大学 XipuAI 网页版 GPT
 SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
+
+
+def launch_chromium(playwright, *, headless: bool):
+    last_error = None
+
+    for channel in ("msedge", "chrome", None):
+        options = {"headless": headless}
+        if channel:
+            options["channel"] = channel
+
+        try:
+            return playwright.chromium.launch(**options)
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError("No Chromium-compatible browser could be launched.") from last_error
 
 
 def main():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = launch_chromium(p, headless=False)
         context = browser.new_context()
         page = context.new_page()
 
         page.goto(SCHOOL_GPT_URL, wait_until="networkidle")
 
-        print("请在打开的浏览器中手动登录学校 XipuAI。")
-        print("登录完成并看到 XipuAI 聊天页面后，回到终端按 Enter。")
+        print("Log in to XipuAI in the browser window.")
+        print("After the chat page is visible, return here and press Enter.")
         input()
 
         context.storage_state(path="school_gpt_state.json")
-        print("登录状态已保存到 school_gpt_state.json")
-        print("注意：不要把 school_gpt_state.json 上传到 GitHub。")
+        print("Login state saved to school_gpt_state.json")
+        print("Do not upload school_gpt_state.json to GitHub.")
 
         browser.close()
 
