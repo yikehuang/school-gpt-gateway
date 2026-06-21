@@ -1,22 +1,35 @@
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
-# 西交利物浦大学 Ehall AI 页面
-SCHOOL_GPT_URL = "https://ehall.xjtlu.edu.cn/default/index.html#/wiseQA"
+# 西交利物浦大学 XipuAI 网页版 GPT
+SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
 
-# 根据当前截图，输入框大概率是 textarea，并带有“发送消息”占位文字。
-# 如果学校页面更新，可以运行：playwright codegen https://ehall.xjtlu.edu.cn/default/index.html#/wiseQA
-# 然后把录制出的输入框选择器替换到这里。
+# XipuAI 聊天输入框候选选择器。
+# 如果学校页面更新，可以运行：playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
+# 然后把录制出的输入框选择器替换或补充到这里。
 CHAT_INPUT_SELECTORS = [
-    "textarea[placeholder*='发送消息']",
-    "textarea[placeholder*='shift']",
+    "textarea[placeholder*='发送']",
+    "textarea[placeholder*='输入']",
+    "textarea[placeholder*='message']",
+    "textarea[placeholder*='Message']",
     "textarea",
     "[contenteditable='true']",
     "div[role='textbox']",
+    "input[placeholder*='发送']",
+    "input[placeholder*='输入']",
 ]
 
-# Ehall AI 的输入框提示为“shift + enter 换行”，所以普通 Enter 通常用于发送。
-# 这里优先用 Enter 发送，避免误点页面右侧或顶部的其他按钮。
+# 多数 GPT 网页支持普通 Enter 发送，Shift + Enter 换行。
 SEND_BY_ENTER = True
+
+# 如果 Enter 不发送，可以把 SEND_BY_ENTER 改成 False，并调整按钮选择器。
+SEND_BUTTON_SELECTORS = [
+    "button:has-text('发送')",
+    "button:has-text('Send')",
+    "button[type='submit']",
+    "[aria-label*='发送']",
+    "[aria-label*='send']",
+    "[aria-label*='Send']",
+]
 
 # 常见 AI 回复区域选择器。若读取失败，需要用浏览器开发者工具确认真实 class。
 ANSWER_SELECTORS = [
@@ -26,6 +39,7 @@ ANSWER_SELECTORS = [
     ".message.assistant",
     "[class*='assistant']",
     "[class*='answer']",
+    "[class*='markdown']",
     "[class*='message']",
     "[class*='chat']",
 ]
@@ -42,7 +56,21 @@ async def _fill_first_available(page, selectors, text: str) -> str:
         except Exception:
             continue
 
-    raise RuntimeError("没有找到 Ehall AI 的输入框。请使用 playwright codegen 确认输入框选择器。")
+    raise RuntimeError("没有找到 XipuAI 的输入框。请使用 playwright codegen 确认输入框选择器。")
+
+
+async def _click_first_available(page, selectors) -> str:
+    """找到第一个可点击发送按钮并点击，返回实际使用的选择器。"""
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            await locator.wait_for(state="visible", timeout=3000)
+            await locator.click()
+            return selector
+        except Exception:
+            continue
+
+    raise RuntimeError("没有找到 XipuAI 的发送按钮。可以先把 SEND_BY_ENTER 改回 True，或用 codegen 确认按钮选择器。")
 
 
 async def _extract_latest_answer(page, question: str) -> str:
@@ -59,33 +87,36 @@ async def _extract_latest_answer(page, question: str) -> str:
         except Exception:
             continue
 
-    # 过滤欢迎语和用户原问题，尽量保留最后一次 AI 回复。
+    # 过滤欢迎语、用户原问题、输入提示，尽量保留最后一次 AI 回复。
     filtered = []
     for text in candidates:
         if question in text and len(text) <= len(question) + 20:
             continue
-        if "Hello, Welcome to inquire" in text:
+        if "Hello, Welcome" in text:
             continue
-        if "你好！欢迎咨询XJTLU" in text:
+        if "欢迎" in text and len(text) < 80:
+            continue
+        if "Shift" in text and "Enter" in text and len(text) < 80:
+            continue
+        if "shift" in text and "enter" in text and len(text) < 80:
             continue
         filtered.append(text)
 
     if filtered:
         return filtered[-1]
 
-    # 兜底：读取页面正文，便于调试，但避免直接返回整页侧边栏内容。
     body_text = (await page.locator("body").inner_text()).strip()
     if body_text:
         raise RuntimeError(
             "页面已有文本，但没有识别出 AI 回复区域。请在 school_gpt_adapter.py 中更新 ANSWER_SELECTORS。"
         )
 
-    raise RuntimeError("没有读取到 Ehall AI 的回答。")
+    raise RuntimeError("没有读取到 XipuAI 的回答。")
 
 
 async def ask_school_gpt(question: str) -> str:
     """
-    使用学校授权的 Ehall AI 网页作为上游服务。
+    使用学校授权的 XipuAI 网页作为上游服务。
 
     安全边界：
     - 用户手动登录学校账号并保存本地状态；
@@ -110,7 +141,7 @@ async def ask_school_gpt(question: str) -> str:
             if SEND_BY_ENTER:
                 await page.keyboard.press("Enter")
             else:
-                await page.click("button:has-text('发送')")
+                await _click_first_available(page, SEND_BUTTON_SELECTORS)
 
             # 等待页面生成回答。真实页面若有“停止生成”按钮，可以改成等待该按钮消失。
             await page.wait_for_timeout(8000)
@@ -118,12 +149,12 @@ async def ask_school_gpt(question: str) -> str:
             answer = await _extract_latest_answer(page, question)
 
             if not answer:
-                raise RuntimeError("Ehall AI 返回了空回答。")
+                raise RuntimeError("XipuAI 返回了空回答。")
 
             return answer
 
         except PlaywrightTimeoutError as exc:
-            raise RuntimeError("Ehall AI 响应超时。") from exc
+            raise RuntimeError("XipuAI 响应超时。") from exc
 
         finally:
             await browser.close()
