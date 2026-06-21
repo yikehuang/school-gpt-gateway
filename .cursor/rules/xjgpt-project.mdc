@@ -1,0 +1,86 @@
+---
+description: XJGPT school gateway project rules
+alwaysApply: true
+---
+
+# XJGPT Project Rules for Cursor
+
+## Project context
+
+This repository contains XJGPT, a local school XipuAI gateway application.
+
+Core components:
+
+- `gateway.py`: FastAPI app and API gateway.
+- `school_gpt_adapter.py`: Playwright Web Adapter for the school XipuAI web page.
+- `login_once.py`: local login-state capture helper.
+- `static/`: ChatGPT-like XJGPT frontend.
+- `xjgpt_gateway/`: package CLI entry points.
+- `docs/`: documentation and project logs.
+
+## Default behavior
+
+Keep the Playwright Web Adapter as the stable default path. Experimental direct-cookie or backend adapters must stay opt-in and must not replace the default unless the user explicitly asks.
+
+## API compatibility
+
+Preserve these endpoints unless the task explicitly changes API shape:
+
+- `GET /`
+- `GET /v1/models`
+- `POST /v1/chat`
+- `POST /v1/chat/completions`
+
+When changing request parsing, keep both supported request styles:
+
+- `{ "question": "...", "model": "..." }`
+- `{ "model": "...", "messages": [{"role":"user","content":"..."}] }`
+
+## Frontend rules
+
+When changing the frontend:
+
+- Keep XJGPT branding.
+- Keep model selection visible.
+- Keep the API settings panel compatible with `/v1/chat`.
+- Keep static assets self-contained unless the task requests a build system.
+
+## Model rules
+
+When changing model selection:
+
+- Update frontend model options.
+- Update backend supported model metadata.
+- Update model mapping documentation.
+- Do not assume that a school web page model has changed unless the adapter confirms it.
+
+## Security boundary
+
+Never commit or generate code containing:
+
+- `school_gpt_state.json`
+- cookies
+- raw `Cookie` headers
+- bearer tokens or Authorization values
+- school passwords
+- `.env` secrets
+- `local_discovery/` outputs
+- personal school account data
+
+Never add code that:
+
+- bypasses CAPTCHA or authentication;
+- extracts credentials from users;
+- uploads login state, cookies, or tokens;
+- prints cookie values or localStorage tokens;
+- calls the real XipuAI service from CI.
+
+## Safe validation
+
+Use this command after edits:
+
+```bash
+bash scripts/codex_check.sh
+```
+
+This validation must remain safe: no school login, no XipuAI request, no cookie access.
