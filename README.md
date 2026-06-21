@@ -2,29 +2,36 @@
 
 这是一个面向学校网页版 GPT 的 AI 中转站项目。系统把学校 XipuAI 网页版 GPT 封装成统一 API，同时提供一个模仿 ChatGPT 交互风格的前端界面 **XJGPT**。前端或其他系统只需要请求 `/v1/chat`，中转站会完成用户鉴权、模型区分、请求转发、回答读取、token 估算和日志记录。
 
+> 当前分支：`feature/cookie-http-adapter`。该分支在原有 Playwright Web Adapter 基础上，加入了实验性的 Cookie HTTP Adapter，用于在学校授权和本地登录状态有效的前提下，更快地直接调用 XipuAI 后端接口。
+
 ## 1. Project Structure
 
 ```text
 school_gpt_gateway/
-├── gateway.py              # 中转站主程序，同时提供 XJGPT 前端入口
-├── school_gpt_adapter.py   # 学校网页版 GPT 适配器，包含模型选择逻辑
-├── login_once.py           # 手动登录并保存学校 GPT 登录状态
-├── xjgpt_gateway/          # Python package CLI 入口
+├── gateway.py                       # 中转站主程序，同时提供 XJGPT 前端入口
+├── adapter_router.py                # 根据环境变量选择 web / cookie 调用模式
+├── school_gpt_adapter.py            # 学校网页版 GPT 适配器，包含网页模型选择逻辑
+├── school_gpt_cookie_adapter.py     # 实验性 Cookie HTTP Adapter
+├── login_once.py                    # 手动登录并保存学校 GPT 登录状态
+├── xjgpt_gateway/                   # Python package CLI 入口
 ├── examples/
-│   └── chat_request.example.json  # OpenAI-style 测试 JSON
+│   └── chat_request.example.json    # OpenAI-style 测试 JSON
 ├── static/
-│   ├── index.html          # XJGPT 前端页面
-│   ├── styles.css          # XJGPT 页面样式
-│   └── app.js              # XJGPT 前端交互逻辑
+│   ├── index.html                   # XJGPT 前端页面
+│   ├── styles.css                   # XJGPT 页面样式
+│   └── app.js                       # XJGPT 前端交互逻辑
 ├── docs/
-│   ├── PACKAGING.md        # 打包说明
-│   └── RELEASE.md          # Release 发布说明
+│   ├── COOKIE_HTTP_ADAPTER.md       # Cookie HTTP Adapter 说明
+│   ├── PACKAGING.md                 # 打包说明
+│   └── RELEASE.md                   # Release 发布说明
 ├── scripts/
-│   └── build_release.py    # 本地 release zip 构建脚本
+│   ├── build_release.py             # 本地 release zip 构建脚本
+│   └── test_cookie_http_adapter.py  # Cookie HTTP Adapter 本地测试脚本
 ├── .github/workflows/
-│   └── release.yml         # GitHub tag release workflow
-├── pyproject.toml          # Python package 配置
-├── MANIFEST.in             # source distribution 文件清单
+│   └── release.yml                  # GitHub tag release workflow
+├── .env.cookie.example              # Cookie 模式环境变量模板
+├── pyproject.toml                   # Python package 配置
+├── MANIFEST.in                      # source distribution 文件清单
 ├── VERSION
 ├── CHANGELOG.md
 ├── requirements.txt
@@ -34,11 +41,13 @@ school_gpt_gateway/
 
 ## 2. Safety Boundary
 
-本项目只适用于学校授权的校内 GPT 网页环境。项目不绕过登录、不破解验证码、不读取他人 Cookie、不保存真实敏感对话内容。`school_gpt_state.json` 是本地登录状态文件，不应上传到 GitHub。
+本项目只适用于学校授权的校内 GPT 环境。项目不绕过登录、不破解验证码、不读取他人 Cookie、不保存真实敏感对话内容。`school_gpt_state.json` 是本地登录状态文件，不应上传到 GitHub。
 
 前端中的演示 API Key 已设置为隐藏输入框，页面不会直接展示该字段。这个处理只适合比赛演示；正式项目不应把真实密钥放在前端代码中，密钥应由后端生成、保存和校验。
 
 `.gitignore` 已加入本地私有 JSON 规则：`*.local.json`、`request.json`、`private_request.json`。如果你有包含隐私内容的测试请求，请使用这些文件名，不要上传到 GitHub。
+
+Cookie HTTP Adapter 只读取你本地 `school_gpt_state.json` 中的登录状态；项目不会打印或上传 cookie 值。该模式需要你在本地配置学校授权的 XipuAI 后端接口。
 
 ## 3. Installation
 
@@ -61,7 +70,41 @@ xjgpt-login
 xjgpt-gateway --host 127.0.0.1 --port 8000
 ```
 
-## 4. School GPT URL
+## 4. Adapter Modes
+
+默认模式是 Playwright Web Adapter：
+
+```bash
+export XJGPT_ADAPTER_MODE=web
+```
+
+实验性的 Cookie HTTP Adapter：
+
+```bash
+export XJGPT_ADAPTER_MODE=cookie
+export XIPUAI_CHAT_ENDPOINT="/your/authorized/xipuai/chat/endpoint"
+```
+
+Windows PowerShell：
+
+```powershell
+$env:XJGPT_ADAPTER_MODE="cookie"
+$env:XIPUAI_CHAT_ENDPOINT="/your/authorized/xipuai/chat/endpoint"
+```
+
+启动服务后，可以检查当前模式：
+
+```bash
+curl http://127.0.0.1:8000/v1/adapter
+```
+
+Cookie 模式的详细配置见：
+
+```text
+docs/COOKIE_HTTP_ADAPTER.md
+```
+
+## 5. School GPT URL
 
 项目当前使用的学校 AI 地址是：
 
@@ -85,7 +128,7 @@ ANSWER_SELECTORS = [".assistant-message", ".ai-message", "[class*='assistant']",
 playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
 ```
 
-## 5. Model Selection
+## 6. Model Selection
 
 XJGPT 前端右上角已经加入模型选择框。前端会把模型 id 一起发送给 `/v1/chat`。
 
@@ -125,21 +168,13 @@ Qwen-Max       -> model id: qwen-max
 
 `auto` 表示不主动切换学校网页模型，直接使用 XipuAI 当前会话里已经选择的模型。`school-web-gpt` 是接口兼容别名，运行时同样会使用 `auto`。
 
-如果学校页面中的模型名称和代码不一致，修改 `school_gpt_adapter.py` 中的 `MODEL_LABELS` 即可：
+在 Web Adapter 中，如果你选择 `gpt-5.4`，中转站会尝试在 XipuAI 网页里选择 `GPT-5.4`。在 Cookie HTTP Adapter 中，中转站会把模型 id 放入 HTTP payload；如果学校后端需要真实模型代码，可以用环境变量覆盖，例如：
 
-```python
-MODEL_LABELS = {
-    "auto": None,
-    "gpt-5.4": "GPT-5.4",
-    "deepseek-r1": "DeepSeek-R1",
-    "deepseek-v3": "DeepSeek-V3",
-    "qwen-max": "Qwen-Max",
-}
+```bash
+export XIPUAI_MODEL_GPT_5_4="real-backend-model-code"
 ```
 
-如果模型下拉框无法自动点击，需要用 `playwright codegen` 获取模型按钮和选项的真实选择器，然后更新 `MODEL_MENU_SELECTORS`。
-
-## 6. Save Login State
+## 7. Save Login State
 
 ```bash
 python login_once.py
@@ -153,7 +188,23 @@ xjgpt-login
 
 浏览器打开后，手动登录学校 XipuAI。登录完成并进入聊天页面后，回到终端按 Enter。程序会保存 `school_gpt_state.json`。
 
-## 7. Start Gateway and Frontend
+## 8. Test Cookie Mode Locally
+
+先检查本地是否有 XipuAI cookie：
+
+```bash
+python scripts/test_cookie_http_adapter.py --check-cookies-only
+```
+
+配置后端接口后测试实际调用：
+
+```bash
+export XJGPT_ADAPTER_MODE=cookie
+export XIPUAI_CHAT_ENDPOINT="/your/authorized/xipuai/chat/endpoint"
+python scripts/test_cookie_http_adapter.py --question "请只回复两个字：成功" --model auto
+```
+
+## 9. Start Gateway and Frontend
 
 ```bash
 uvicorn gateway:app --host 0.0.0.0 --port 8000
@@ -178,111 +229,3 @@ sk-student-demo-001
 ```
 
 该 Key 在前端界面中隐藏，不会作为可见输入项展示。
-
-## 8. Test API
-
-### 8.1 使用上传的 JSON 格式测试 `/v1/chat`
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/chat \
-  -H "Authorization: Bearer sk-student-demo-001" \
-  -H "Content-Type: application/json" \
-  -d @examples/chat_request.example.json
-```
-
-### 8.2 使用 OpenAI-style endpoint 测试 `/v1/chat/completions`
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/chat/completions \
-  -H "Authorization: Bearer sk-student-demo-001" \
-  -H "Content-Type: application/json" \
-  -d @examples/chat_request.example.json
-```
-
-### 8.3 使用旧版 question 格式测试
-
-```bash
-curl -X POST http://127.0.0.1:8000/v1/chat \
-  -H "Authorization: Bearer sk-student-demo-001" \
-  -H "Content-Type: application/json" \
-  -d "{\"question\":\"请解释什么是 AI 中转站\",\"model\":\"gpt-5.4\"}"
-```
-
-查看可选模型：
-
-```bash
-curl http://127.0.0.1:8000/v1/models
-```
-
-## 9. Admin Logs
-
-```bash
-curl http://127.0.0.1:8000/admin/logs \
-  -H "Authorization: Bearer admin-demo-key"
-```
-
-日志会记录 `requested_model`、`runtime_model` 和 `model_name`，用于区分不同模型的调用情况。
-
-## 10. Packaging
-
-项目已经补齐 Python package 配置。核心文件包括：
-
-```text
-pyproject.toml
-MANIFEST.in
-xjgpt_gateway/
-VERSION
-CHANGELOG.md
-```
-
-本地构建 Python package：
-
-```bash
-python -m pip install --upgrade build
-python -m build
-```
-
-输出文件位于：
-
-```text
-dist/
-```
-
-构建课程提交或演示用 release zip：
-
-```bash
-python scripts/build_release.py
-```
-
-输出文件位于：
-
-```text
-release/xjgpt-school-gateway-0.1.0.zip
-```
-
-更详细的打包说明见 `docs/PACKAGING.md`。
-
-## 11. Release
-
-仓库已经补齐 GitHub Actions release workflow：
-
-```text
-.github/workflows/release.yml
-```
-
-推送 `v*` 标签后，GitHub 会自动构建 wheel、source distribution 和 release zip，并上传到 GitHub Release：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-更详细的发布说明见 `docs/RELEASE.md`。
-
-## 12. XJGPT Frontend
-
-XJGPT 前端位于 `static/` 目录。界面包含侧边栏、新建会话、历史会话、隐藏演示 API Key、模型选择框、消息区、推荐问题和底部输入框。前端会调用同源接口 `/v1/chat`，并把用户输入转换成 OpenAI-style `messages` 请求体。中转站再通过 Web Adapter 访问学校 XipuAI 网页，读取回答并返回给前端。
-
-## 13. Competition Explanation
-
-本项目面向学校网页版 GPT 设计中转站和 XJGPT 前端。由于学校 GPT 主要以网页形式提供服务，系统使用 Web Adapter 把网页交互封装为统一 API。用户请求进入中转站后，系统先校验 API Key，再根据前端选择的模型 id 尝试切换学校 XipuAI 网页模型，随后提交问题并读取回答。系统同时记录模型、token 估算、响应耗时和调用状态，展示了校内模型资源统一接入、权限管理、模型路由和用量治理能力。
