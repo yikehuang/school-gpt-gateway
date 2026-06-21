@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XJGPT</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">XJ</div>
+        <div>
+          <div class="brand-name">XJGPT</div>
+          <div class="brand-subtitle">School AI Gateway</div>
+        </div>
+      </div>
+
+      <button class="new-chat-button" id="newChatButton" type="button">
+        <span>＋</span>
+        新建会话
+      </button>
+
+      <div class="sidebar-section-title">今天</div>
+      <div class="conversation-list" id="conversationList"></div>
+
+      <div class="sidebar-footer">
+        <label class="api-key-label" for="apiKeyInput">API Key</label>
+        <input id="apiKeyInput" class="api-key-input" value="sk-student-demo-001" />
+        <p class="footer-note">本地演示密钥。正式项目应由后端生成用户密钥。</p>
+      </div>
+    </aside>
+
+    <main class="chat-main">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="toggleSidebar" type="button" aria-label="切换侧边栏">☰</button>
+        <div class="topbar-title">
+          <span>XJGPT</span>
+          <span class="model-pill">XipuAI Web Adapter</span>
+        </div>
+        <div class="status-pill" id="statusPill">Ready</div>
+      </header>
+
+      <section class="messages" id="messages">
+        <div class="welcome-card" id="welcomeCard">
+          <div class="welcome-logo">XJ</div>
+          <h1>XJGPT</h1>
+          <p>通过学校 XipuAI 网页服务回答问题，并由中转站返回结果。</p>
+          <div class="suggestion-grid">
+            <button class="suggestion">请解释什么是 AI 中转站</button>
+            <button class="suggestion">How to book rooms?</button>
+            <button class="suggestion">帮我总结 XJGPT 项目架构</button>
+            <button class="suggestion">What is token estimation?</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="composer-wrap">
+        <form class="composer" id="chatForm">
+          <textarea id="promptInput" rows="1" placeholder="发送消息，Shift + Enter 换行"></textarea>
+          <button id="sendButton" class="send-button" type="submit" aria-label="发送">↑</button>
+        </form>
+        <div class="composer-hint">XJGPT 会把问题提交到学校 XipuAI 网页端。请不要输入敏感个人信息。</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
