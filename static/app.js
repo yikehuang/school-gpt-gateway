@@ -6,12 +6,14 @@ const sendButton = document.getElementById("sendButton");
 const newChatButton = document.getElementById("newChatButton");
 const conversationList = document.getElementById("conversationList");
 const apiKeyInput = document.getElementById("apiKeyInput");
+const modelSelect = document.getElementById("modelSelect");
 const statusPill = document.getElementById("statusPill");
 const toggleSidebar = document.getElementById("toggleSidebar");
 const sidebar = document.getElementById("sidebar");
 
 const STORAGE_KEY = "xjgpt-conversations";
 const API_KEY_STORAGE = "xjgpt-api-key";
+const MODEL_STORAGE = "xjgpt-model";
 
 let conversations = loadConversations();
 let activeConversationId = conversations[0]?.id || createConversation().id;
@@ -21,6 +23,15 @@ apiKeyInput.value = localStorage.getItem(API_KEY_STORAGE) || apiKeyInput.value;
 apiKeyInput.addEventListener("input", () => {
   localStorage.setItem(API_KEY_STORAGE, apiKeyInput.value.trim());
 });
+
+modelSelect.value = localStorage.getItem(MODEL_STORAGE) || modelSelect.value;
+modelSelect.addEventListener("change", () => {
+  localStorage.setItem(MODEL_STORAGE, modelSelect.value);
+});
+
+function getSelectedModelName() {
+  return modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
+}
 
 function loadConversations() {
   try {
@@ -162,7 +173,7 @@ function resizeTextarea() {
   promptInput.style.height = `${Math.min(promptInput.scrollHeight, 180)}px`;
 }
 
-function addTypingMessage() {
+function addTypingMessage(modelName) {
   const row = document.createElement("article");
   row.className = "message-row assistant";
   row.id = "typingMessage";
@@ -170,7 +181,7 @@ function addTypingMessage() {
     <div class="message-avatar">XJ</div>
     <div class="message-content">
       <div class="message-role">XJGPT</div>
-      <div class="typing"><span></span><span></span><span></span> 正在通过学校 XipuAI 获取回答</div>
+      <div class="typing"><span></span><span></span><span></span> 正在通过学校 XipuAI 获取回答，模型：${modelName}</div>
     </div>
   `;
   messagesEl.appendChild(row);
@@ -184,6 +195,9 @@ function removeTypingMessage() {
 
 async function sendMessage(question) {
   const apiKey = apiKeyInput.value.trim();
+  const model = modelSelect.value;
+  const modelName = getSelectedModelName();
+
   if (!apiKey) {
     setStatus("Missing API key", "error");
     alert("请先填写 API Key。默认演示 Key 是 sk-student-demo-001。 ");
@@ -191,7 +205,13 @@ async function sendMessage(question) {
   }
 
   const conversation = getActiveConversation();
-  conversation.messages.push({ role: "user", content: question });
+  conversation.messages.push({
+    role: "user",
+    content: question,
+    meta: {
+      model: modelName
+    }
+  });
 
   if (conversation.title === "新的会话") {
     conversation.title = question.slice(0, 28) || "新的会话";
@@ -199,11 +219,11 @@ async function sendMessage(question) {
 
   saveConversations();
   render();
-  addTypingMessage();
+  addTypingMessage(modelName);
 
   isSending = true;
   sendButton.disabled = true;
-  setStatus("Asking XipuAI", "loading");
+  setStatus(`Asking ${modelName}`, "loading");
 
   try {
     const response = await fetch("/v1/chat", {
@@ -212,7 +232,7 @@ async function sendMessage(question) {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ question })
+      body: JSON.stringify({ question, model })
     });
 
     const data = await response.json();
@@ -227,7 +247,7 @@ async function sendMessage(question) {
       role: "assistant",
       content: data.answer || "学校 GPT 返回了空回答。",
       meta: {
-        model: data.model || "school-web-gpt",
+        model: data.model_name || data.model || modelName,
         tokens: data.usage?.total_tokens ?? "-",
         latency: `${data.latency_ms ?? "-"}ms`
       }
@@ -240,7 +260,7 @@ async function sendMessage(question) {
     removeTypingMessage();
     conversation.messages.push({
       role: "assistant",
-      content: `请求失败：${error.message}\n\n请检查：1）是否已运行 python login_once.py 保存登录状态；2）XipuAI 页面是否能正常访问；3）页面选择器是否需要调整。`
+      content: `请求失败：${error.message}\n\n请检查：1）是否已运行 python login_once.py 保存登录状态；2）XipuAI 页面是否能正常访问；3）页面选择器是否需要调整；4）你选择的模型名称是否和学校网页里的模型名称一致。`
     });
     saveConversations();
     setStatus("Error", "error");
