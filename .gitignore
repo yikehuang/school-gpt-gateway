@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Playwright login state - DO NOT upload
+school_gpt_state.json
+
+# Logs
+*.log
