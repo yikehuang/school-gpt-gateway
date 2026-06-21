@@ -34,7 +34,29 @@ Do not:
 
 The cookie adapter needs the real backend endpoint used by XipuAI. This branch does not hard-code that endpoint because it must be confirmed from the authorized school environment.
 
-Set these environment variables locally:
+You can now use the local discovery helper:
+
+```bash
+xjgpt-login
+xjgpt-discover-endpoint
+```
+
+If auto-submit does not work, use manual mode:
+
+```bash
+xjgpt-discover-endpoint --manual --timeout 60
+```
+
+The helper writes a local report and a suggested env file:
+
+```text
+local_discovery/xipuai_endpoint_candidates.json
+.env.cookie.local
+```
+
+Detailed instructions are in `docs/ENDPOINT_DISCOVERY.md`.
+
+After reviewing the suggested endpoint, set these environment variables locally:
 
 ```bash
 export XJGPT_ADAPTER_MODE=cookie
@@ -139,11 +161,13 @@ export XIPUAI_MODEL_GPT_5_4="the-real-backend-model-code"
 ```text
 adapter_router.py
 school_gpt_cookie_adapter.py
+xjgpt_gateway/discover.py
 scripts/test_cookie_http_adapter.py
 docs/COOKIE_HTTP_ADAPTER.md
+docs/ENDPOINT_DISCOVERY.md
 .env.cookie.example
 ```
 
 ## Current Limitation
 
-The cookie adapter cannot be fully activated until `XIPUAI_CHAT_ENDPOINT` is known. Without that endpoint, it can only verify that local cookies exist and that your saved login state is present.
+The cookie adapter cannot be fully activated until `XIPUAI_CHAT_ENDPOINT` is known. The endpoint discovery helper is designed to identify that endpoint from your local authorized browser session, but you still need to review the suggested result before enabling cookie mode.
