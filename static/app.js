@@ -617,6 +617,96 @@ function applyGatewayConfigFromForm() {
   }
 }
 
+const LATEX_COMMAND_PATTERN = /\\(?:frac|sqrt|pm|mp|times|cdot|div|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|omega|int|sum|prod|lim|sin|cos|tan|log|ln|left|right|begin|end|leq|geq|neq|approx|infty|mathbf|mathrm|mathbb|vec|bar|hat|overline|underline)\b/;
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizeSchoolMathDelimiters(text) {
+  return String(text ?? "").replace(/(^|[^\w\\])\[\s*([^\]\n]*(?:\\[a-zA-Z]+)[^\]\n]*)\s*\]/g, (match, prefix, expression) => {
+    return `${prefix}\\[${expression.trim()}\\]`;
+  });
+}
+
+function parseMathToken(token) {
+  if (token.startsWith("\\[") && token.endsWith("\\]")) {
+    return { expression: token.slice(2, -2), displayMode: true, explicit: true };
+  }
+
+  if (token.startsWith("\\(") && token.endsWith("\\)")) {
+    return { expression: token.slice(2, -2), displayMode: false, explicit: true };
+  }
+
+  if (token.startsWith("$$") && token.endsWith("$$")) {
+    return { expression: token.slice(2, -2), displayMode: true, explicit: true };
+  }
+
+  if (token.startsWith("$") && token.endsWith("$")) {
+    return { expression: token.slice(1, -1), displayMode: false, explicit: false };
+  }
+
+  return null;
+}
+
+function looksLikeMathExpression(expression) {
+  const value = expression.trim();
+  return LATEX_COMMAND_PATTERN.test(value) || /[\^_{}=+\-*/]|[0-9]/.test(value) || /^[a-zA-Z]$/.test(value);
+}
+
+function renderMathExpression(expression, displayMode) {
+  const value = expression.trim();
+  const className = displayMode ? "math-display" : "math-inline";
+
+  if (!value) {
+    return "";
+  }
+
+  if (window.katex?.renderToString) {
+    try {
+      return `<span class="${className}">${window.katex.renderToString(value, {
+        displayMode,
+        throwOnError: false,
+        strict: "ignore",
+        trust: false
+      })}</span>`;
+    } catch {
+      // Fall through to escaped text if KaTeX cannot parse the expression.
+    }
+  }
+
+  return `<span class="${className} math-fallback">${escapeHtml(value)}</span>`;
+}
+
+function renderMessageContent(rawContent) {
+  const source = normalizeSchoolMathDelimiters(rawContent);
+  const mathPattern = /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|\$[^\n$]+\$)/g;
+  let lastIndex = 0;
+  let html = "";
+
+  source.replace(mathPattern, (match, offset) => {
+    const math = parseMathToken(match);
+    html += escapeHtml(source.slice(lastIndex, offset));
+
+    if (math && (math.explicit || looksLikeMathExpression(math.expression))) {
+      html += renderMathExpression(math.expression, math.displayMode);
+    } else {
+      html += escapeHtml(match);
+    }
+
+    lastIndex = offset + match.length;
+    return match;
+  });
+
+  html += escapeHtml(source.slice(lastIndex));
+  return html;
+}
+
 function buildChatPayload(question, model, thinking = getSelectedThinking(), images = []) {
   const format = apiSettings.requestFormat || "messages";
   const clientModel = CLIENT_MODEL_ID;
@@ -737,7 +827,6 @@ function createMessageNode(message) {
   role.textContent = message.role === "user" ? "You" : "XJGPT";
 
   const content = document.createElement("div");
-  content.textContent = message.content;
 
   contentWrap.appendChild(role);
 
@@ -760,6 +849,8 @@ function createMessageNode(message) {
     contentWrap.appendChild(imageGrid);
   }
 
+  content.className = "message-body";
+  content.innerHTML = renderMessageContent(message.content);
   contentWrap.appendChild(content);
 
   if (message.meta) {

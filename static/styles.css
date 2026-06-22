@@ -404,8 +404,31 @@ button {
   flex: 1;
   min-width: 0;
   line-height: 1.75;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.message-body {
+  white-space: pre-wrap;
+}
+
+.math-inline,
+.math-display {
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.math-display {
+  display: block;
+  margin: 10px 0;
+  overflow-x: auto;
+}
+
+.math-display .katex-display {
+  margin: 0;
+}
+
+.math-fallback {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
 .message-role {
