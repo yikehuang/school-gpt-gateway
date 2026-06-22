@@ -1,0 +1,25 @@
+# XJGPT Windsurf Rules
+
+Project: XJGPT school XipuAI gateway.
+
+## Work safely
+
+- Do not commit or expose `school_gpt_state.json`, cookies, tokens, `.env`, passwords, local discovery outputs, or private request dumps.
+- Do not add code that bypasses authentication, solves CAPTCHA, scrapes credentials, uploads login state, or calls XipuAI from CI.
+- Preserve the stable Playwright Web Adapter as the default integration path.
+
+## Main files
+
+- `gateway.py`: FastAPI app.
+- `school_gpt_adapter.py`: Playwright Web Adapter.
+- `static/`: frontend.
+- `xjgpt_gateway/`: package entry points.
+- `docs/`: docs and logs.
+
+## Required checks
+
+After changes, run:
+
+```bash
+bash scripts/codex_check.sh
+```

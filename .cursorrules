@@ -1,0 +1,21 @@
+# XJGPT Cursor Rules
+
+This repository contains XJGPT, a local school XipuAI gateway.
+
+Follow these rules when editing code:
+
+- Keep `gateway.py` API-compatible with `/v1/chat` and `/v1/chat/completions`.
+- Keep the Playwright Web Adapter as the stable default integration path.
+- Treat cookie/backend direct access as experimental and opt-in.
+- Do not commit `school_gpt_state.json`, `.env`, cookies, tokens, passwords, local discovery outputs, or private request dumps.
+- Do not print cookie values, Authorization headers, bearer tokens, or localStorage token values.
+- Do not add CAPTCHA bypass, credential scraping, or hidden account automation.
+- Do not call the real XipuAI backend from CI.
+- When changing models, update frontend options, backend metadata, and documentation together.
+- When changing frontend behavior, keep XJGPT branding and the API settings panel.
+
+Before finishing code work, run:
+
+```bash
+bash scripts/codex_check.sh
+```

@@ -1,0 +1,34 @@
+# XJGPT Cline Rules
+
+This repository is XJGPT, a local school XipuAI gateway.
+
+## Development constraints
+
+- Keep `/v1/chat` and `/v1/chat/completions` compatible.
+- Keep Playwright Web Adapter as the stable default path.
+- Treat Cookie HTTP Adapter or direct backend access as experimental and local-only.
+- Do not call XipuAI from automated checks.
+- Do not require `school_gpt_state.json` during CI validation.
+
+## Security constraints
+
+Never commit, print, or upload:
+
+- cookies
+- bearer tokens
+- Authorization values
+- `school_gpt_state.json`
+- `.env` secrets
+- school passwords
+- `local_discovery/` outputs
+- private request dumps
+
+Never implement authentication bypass, CAPTCHA bypass, credential scraping, or hidden account automation.
+
+## Validation
+
+Run:
+
+```bash
+bash scripts/codex_check.sh
+```
