@@ -3,6 +3,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 import gateway
+import school_gpt_adapter
 
 
 def test_gateway_config_round_trip(tmp_path, monkeypatch):
@@ -87,3 +88,29 @@ def test_default_client_model_uses_gateway_default(tmp_path, monkeypatch):
     assert result["model"] == "DeepSeek-V3.1-W8A8"
     assert result["thinking"] == "low"
     assert result["gateway_model_forced"] is True
+
+
+def test_school_login_status_requires_api_key():
+    client = TestClient(gateway.app)
+
+    response = client.get("/v1/school-login/status")
+
+    assert response.status_code == 401
+
+
+def test_school_login_status_without_state_file(tmp_path, monkeypatch):
+    state_file = tmp_path / "school_gpt_state.json"
+    monkeypatch.setattr(school_gpt_adapter, "SCHOOL_GPT_STATE_FILE", state_file)
+    monkeypatch.setattr(school_gpt_adapter, "LOGIN_SESSION", {})
+
+    client = TestClient(gateway.app)
+    response = client.get(
+        "/v1/school-login/status",
+        headers={"Authorization": "Bearer sk-student-demo-001"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["state_file_exists"] is False
+    assert data["logged_in"] is False
+    assert data["active"] is False

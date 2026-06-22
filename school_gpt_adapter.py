@@ -11,6 +11,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 SCHOOL_GPT_URL = "https://xipuai.xjtlu.edu.cn/v3/chat"
 SCHOOL_GPT_BASE_URL = "https://xipuai.xjtlu.edu.cn"
 SCHOOL_GPT_STATE_FILE = Path("school_gpt_state.json")
+SCHOOL_GPT_STATE_TEMP_FILE = Path("school_gpt_state.tmp.json")
 
 CHAT_CONFIG_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/config?lang=en&sf_request_type=ajax"
 CHAT_SESSION_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/session?lang=en&sf_request_type=ajax"
@@ -18,6 +19,7 @@ CHAT_COMPLETIONS_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/completions?sf_req
 CHAT_SAVE_SESSION_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/saveSession?sf_request_type=ajax"
 
 HTTP_TIMEOUT = httpx.Timeout(90.0, connect=20.0, read=90.0)
+LOGIN_SESSION: dict[str, Any] = {}
 
 # 前端和 API 可传入这些 model id。label 必须尽量匹配学校网页下拉框里的文字。
 # 如果学校页面里的模型名称和这里不同，只需要改 label，不需要改前端接口。
@@ -178,6 +180,96 @@ def _build_direct_client(state: dict[str, Any]) -> httpx.AsyncClient:
         timeout=HTTP_TIMEOUT,
         trust_env=False,
     )
+
+
+def get_school_gpt_login_status() -> dict[str, Any]:
+    state_exists = SCHOOL_GPT_STATE_FILE.exists()
+    updated_at = int(SCHOOL_GPT_STATE_FILE.stat().st_mtime) if state_exists else None
+    token_present = False
+    error = None
+
+    if state_exists:
+        try:
+            _extract_jm_token(_load_storage_state())
+            token_present = True
+        except Exception as exc:
+            error = str(exc)
+
+    return {
+        "url": SCHOOL_GPT_URL,
+        "state_file": str(SCHOOL_GPT_STATE_FILE),
+        "state_file_exists": state_exists,
+        "logged_in": token_present,
+        "token_present": token_present,
+        "active": bool(LOGIN_SESSION.get("context")),
+        "updated_at": updated_at,
+        "error": error,
+    }
+
+
+async def close_school_gpt_login_session() -> None:
+    browser = LOGIN_SESSION.get("browser")
+    playwright = LOGIN_SESSION.get("playwright")
+    LOGIN_SESSION.clear()
+
+    if browser:
+        try:
+            await browser.close()
+        except Exception:
+            pass
+
+    if playwright:
+        try:
+            await playwright.stop()
+        except Exception:
+            pass
+
+
+async def start_school_gpt_login_session() -> dict[str, Any]:
+    if LOGIN_SESSION.get("context"):
+        return get_school_gpt_login_status()
+
+    playwright = await async_playwright().start()
+
+    try:
+        browser = await playwright.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
+        await page.goto(SCHOOL_GPT_URL, wait_until="commit")
+    except Exception as exc:
+        await playwright.stop()
+        raise DirectAdapterError(f"打开 XipuAI 登录窗口失败：{exc}") from exc
+
+    LOGIN_SESSION.update({
+        "playwright": playwright,
+        "browser": browser,
+        "context": context,
+        "page": page,
+    })
+    return get_school_gpt_login_status()
+
+
+async def save_school_gpt_login_session() -> dict[str, Any]:
+    context = LOGIN_SESSION.get("context")
+
+    if not context:
+        raise DirectAdapterError("还没有打开学校 AI 登录窗口，请先点击“打开登录窗口”。")
+
+    await context.storage_state(path=str(SCHOOL_GPT_STATE_TEMP_FILE))
+
+    try:
+        state = json.loads(SCHOOL_GPT_STATE_TEMP_FILE.read_text(encoding="utf-8"))
+        _extract_jm_token(state)
+    except Exception as exc:
+        try:
+            SCHOOL_GPT_STATE_TEMP_FILE.unlink()
+        except OSError:
+            pass
+        raise DirectAdapterError("没有检测到 XipuAI 登录令牌，请先在弹出的浏览器里完成学校 AI 登录。") from exc
+
+    SCHOOL_GPT_STATE_TEMP_FILE.replace(SCHOOL_GPT_STATE_FILE)
+    await close_school_gpt_login_session()
+    return get_school_gpt_login_status()
 
 
 def _format_model_option(option: dict[str, Any]) -> dict[str, Any] | None:

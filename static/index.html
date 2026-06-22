@@ -59,6 +59,7 @@
               <option value="high">深度分析</option>
             </select>
           </label>
+          <button class="secondary-button school-login-button" id="schoolLoginButton" type="button">登录学校AI</button>
           <button class="secondary-button" id="topSettingsButton" type="button">设置</button>
           <div class="status-pill" id="statusPill">Ready</div>
         </div>
@@ -121,6 +122,26 @@
             </select>
             <small>对应 API 字段：thinking / reasoning_effort。</small>
           </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-header">
+          <h3>学校 AI 登录</h3>
+          <p>打开学校 XipuAI 登录窗口，手动登录后保存浏览器登录态。之后中转站会复用你自己的学校授权。</p>
+        </div>
+
+        <div class="login-status-card">
+          <div>
+            <span class="login-status-label">登录状态</span>
+            <strong id="schoolLoginStatus">检查中...</strong>
+            <small id="schoolLoginHint">需要登录时，先打开登录窗口，再保存登录态。</small>
+          </div>
+          <div class="login-actions">
+            <button class="secondary-button" id="openSchoolLoginButton" type="button">打开登录窗口</button>
+            <button class="primary-button" id="saveSchoolLoginButton" type="button">保存登录态</button>
+            <button class="secondary-button" id="cancelSchoolLoginButton" type="button">取消登录窗口</button>
+          </div>
         </div>
       </section>
 

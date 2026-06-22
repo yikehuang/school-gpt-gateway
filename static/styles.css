@@ -145,6 +145,12 @@ button {
   padding: 8px 12px;
 }
 
+.school-login-button.logged-in {
+  border-color: rgba(16, 163, 127, 0.35);
+  color: var(--accent-dark);
+  background: #ecfdf5;
+}
+
 .text-button {
   padding: 6px 10px;
   font-size: 12px;
@@ -574,6 +580,41 @@ button {
   font-size: 13px;
 }
 
+.login-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fafafa;
+}
+
+.login-status-card strong,
+.login-status-card small {
+  display: block;
+}
+
+.login-status-card strong {
+  margin-top: 4px;
+  font-size: 15px;
+}
+
+.login-status-label,
+.login-status-card small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.login-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -690,5 +731,14 @@ button {
   .suggestion-grid,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .login-status-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .login-actions {
+    justify-content: flex-start;
   }
 }

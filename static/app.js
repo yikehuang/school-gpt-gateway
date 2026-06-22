@@ -19,6 +19,12 @@ const saveSettingsButton = document.getElementById("saveSettingsButton");
 const resetSettingsButton = document.getElementById("resetSettingsButton");
 const testApiButton = document.getElementById("testApiButton");
 const copyPreviewButton = document.getElementById("copyPreviewButton");
+const schoolLoginButton = document.getElementById("schoolLoginButton");
+const openSchoolLoginButton = document.getElementById("openSchoolLoginButton");
+const saveSchoolLoginButton = document.getElementById("saveSchoolLoginButton");
+const cancelSchoolLoginButton = document.getElementById("cancelSchoolLoginButton");
+const schoolLoginStatus = document.getElementById("schoolLoginStatus");
+const schoolLoginHint = document.getElementById("schoolLoginHint");
 const apiBaseUrlInput = document.getElementById("apiBaseUrlInput");
 const apiEndpointSelect = document.getElementById("apiEndpointSelect");
 const apiKeyInput = document.getElementById("apiKeyInput");
@@ -56,6 +62,7 @@ let conversations = loadConversations();
 let activeConversationId = conversations[0]?.id || createConversation().id;
 let isSending = false;
 let apiSettings = loadApiSettings();
+let schoolLoginSessionActive = false;
 
 function loadApiSettings() {
   try {
@@ -108,6 +115,22 @@ function buildModelsUrl() {
 function buildGatewayConfigUrl() {
   const baseUrl = (apiSettings.apiBaseUrl || "").trim().replace(/\/$/, "");
   return baseUrl ? `${baseUrl}/v1/gateway-config` : "/v1/gateway-config";
+}
+
+function buildSchoolLoginUrl(action = "status") {
+  const baseUrl = (apiSettings.apiBaseUrl || "").trim().replace(/\/$/, "");
+  const endpoint = action === "status" ? "/v1/school-login/status" : `/v1/school-login/${action}`;
+  return baseUrl ? `${baseUrl}${endpoint}` : endpoint;
+}
+
+function getApiKeyOrThrow() {
+  const apiKey = apiSettings.apiKey.trim();
+
+  if (!apiKey) {
+    throw new Error("API Key 缺失。请打开设置填写 Authorization Bearer Key。");
+  }
+
+  return apiKey;
 }
 
 function ensureSelectOption(selectEl, value, label = value) {
@@ -204,12 +227,145 @@ async function loadGatewayConfig() {
   }
 }
 
-async function saveGatewayConfigToBackend() {
-  const apiKey = apiSettings.apiKey.trim();
+function formatLoginTime(timestamp) {
+  if (!timestamp) return "";
+  return new Date(timestamp * 1000).toLocaleString();
+}
 
-  if (!apiKey) {
-    throw new Error("API Key 缺失，无法保存后端默认配置。");
+function updateSchoolLoginUi(status) {
+  const data = status || {};
+  schoolLoginSessionActive = Boolean(data.active);
+  const loggedIn = Boolean(data.logged_in);
+  const updatedAt = formatLoginTime(data.updated_at);
+
+  if (schoolLoginStatus) {
+    if (schoolLoginSessionActive) {
+      schoolLoginStatus.textContent = "登录窗口已打开";
+    } else if (loggedIn) {
+      schoolLoginStatus.textContent = updatedAt ? `已登录，保存于 ${updatedAt}` : "已登录";
+    } else {
+      schoolLoginStatus.textContent = "未检测到可用登录态";
+    }
   }
+
+  if (schoolLoginHint) {
+    if (schoolLoginSessionActive) {
+      schoolLoginHint.textContent = "请在弹出的浏览器里完成学校 AI 登录，然后点击“保存登录态”。";
+    } else if (loggedIn) {
+      schoolLoginHint.textContent = "中转站会复用已保存的学校登录态，不会在前端暴露 cookie 或 token。";
+    } else {
+      schoolLoginHint.textContent = data.error || "需要登录时，先打开登录窗口，再保存登录态。";
+    }
+  }
+
+  if (schoolLoginButton) {
+    schoolLoginButton.textContent = schoolLoginSessionActive ? "保存登录态" : loggedIn ? "学校AI已登录" : "登录学校AI";
+    schoolLoginButton.classList.toggle("logged-in", loggedIn && !schoolLoginSessionActive);
+  }
+
+  if (saveSchoolLoginButton) {
+    saveSchoolLoginButton.disabled = !schoolLoginSessionActive;
+  }
+
+  if (cancelSchoolLoginButton) {
+    cancelSchoolLoginButton.disabled = !schoolLoginSessionActive;
+  }
+}
+
+async function callSchoolLoginEndpoint(action, method = "POST") {
+  const response = await fetch(buildSchoolLoginUrl(action), {
+    method,
+    headers: {
+      "Authorization": `Bearer ${getApiKeyOrThrow()}`,
+      "Content-Type": "application/json"
+    }
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.data) {
+    throw new Error(data.detail || data.error?.message || "学校 AI 登录接口调用失败");
+  }
+
+  updateSchoolLoginUi(data.data);
+  return data.data;
+}
+
+async function refreshSchoolLoginStatus(silent = false) {
+  try {
+    return await callSchoolLoginEndpoint("status", "GET");
+  } catch (error) {
+    if (!silent) {
+      setStatus("Login status failed", "error");
+      alert(`登录状态读取失败：${error.message}`);
+    }
+    return null;
+  }
+}
+
+async function startSchoolLogin() {
+  const buttons = [schoolLoginButton, openSchoolLoginButton].filter(Boolean);
+  buttons.forEach(button => { button.disabled = true; });
+  setStatus("Opening school login", "loading");
+
+  try {
+    await callSchoolLoginEndpoint("start");
+    setStatus("Login window opened");
+    alert("学校 AI 登录窗口已打开。请在弹出的浏览器里完成登录，然后回到 XJGPT 点击“保存登录态”。");
+  } catch (error) {
+    setStatus("Login open failed", "error");
+    alert(`打开学校 AI 登录失败：${error.message}`);
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+async function saveSchoolLogin() {
+  const buttons = [schoolLoginButton, saveSchoolLoginButton].filter(Boolean);
+  buttons.forEach(button => { button.disabled = true; });
+  setStatus("Saving school login", "loading");
+
+  try {
+    await callSchoolLoginEndpoint("save");
+    await loadModelOptions();
+    await loadGatewayConfig();
+    setStatus("School AI logged in");
+    alert("学校 AI 登录态已保存。现在中转站可以复用这次登录。");
+  } catch (error) {
+    setStatus("Login save failed", "error");
+    alert(`保存学校 AI 登录态失败：${error.message}`);
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+    await refreshSchoolLoginStatus(true);
+  }
+}
+
+async function cancelSchoolLogin() {
+  const buttons = [cancelSchoolLoginButton, schoolLoginButton].filter(Boolean);
+  buttons.forEach(button => { button.disabled = true; });
+  setStatus("Closing login window", "loading");
+
+  try {
+    await callSchoolLoginEndpoint("cancel");
+    setStatus("Login window closed");
+  } catch (error) {
+    setStatus("Cancel failed", "error");
+    alert(`关闭登录窗口失败：${error.message}`);
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+async function handleSchoolLoginShortcut() {
+  if (schoolLoginSessionActive) {
+    await saveSchoolLogin();
+  } else {
+    await startSchoolLogin();
+  }
+}
+
+async function saveGatewayConfigToBackend() {
+  const apiKey = getApiKeyOrThrow();
 
   const payload = {
     model: modelSelect.value,
@@ -531,11 +687,7 @@ function parseUsage(data) {
 }
 
 async function callConfiguredApi(question, model, thinking = getSelectedThinking()) {
-  const apiKey = apiSettings.apiKey.trim();
-
-  if (!apiKey) {
-    throw new Error("API Key 缺失。请打开设置填写 Authorization Bearer Key。");
-  }
+  const apiKey = getApiKeyOrThrow();
 
   const response = await fetch(buildApiUrl(), {
     method: "POST",
@@ -610,7 +762,7 @@ async function sendMessage(question) {
     removeTypingMessage();
     conversation.messages.push({
       role: "assistant",
-      content: `请求失败：${error.message}\n\n请检查：1）设置里的 API Base URL、Endpoint 和 Key 是否正确；2）是否已运行 python login_once.py 保存登录状态；3）XipuAI 页面是否能正常访问；4）页面选择器是否需要调整；5）你选择的模型名称是否和学校网页里的模型名称一致。`
+      content: `请求失败：${error.message}\n\n请检查：1）设置里的 API Base URL、Endpoint 和 Key 是否正确；2）是否已点击顶部“登录学校AI”并保存登录态；3）XipuAI 页面是否能正常访问；4）页面选择器是否需要调整；5）中转站默认模型名称是否和学校网页里的模型名称一致。`
     });
     saveConversations();
     setStatus("Error", "error");
@@ -626,6 +778,7 @@ function openSettings() {
   applySettingsToForm();
   syncGatewayConfigForm();
   renderRequestPreview();
+  refreshSchoolLoginStatus(true);
   settingsModal.classList.add("open");
   settingsModal.setAttribute("aria-hidden", "false");
   gatewayModelSelect.focus();
@@ -761,6 +914,10 @@ saveSettingsButton.addEventListener("click", saveSettingsFromModal);
 resetSettingsButton.addEventListener("click", resetSettings);
 testApiButton.addEventListener("click", testApiFromSettings);
 copyPreviewButton.addEventListener("click", copyPreview);
+schoolLoginButton.addEventListener("click", handleSchoolLoginShortcut);
+openSchoolLoginButton.addEventListener("click", startSchoolLogin);
+saveSchoolLoginButton.addEventListener("click", saveSchoolLogin);
+cancelSchoolLoginButton.addEventListener("click", cancelSchoolLogin);
 
 [apiBaseUrlInput, apiEndpointSelect, apiKeyInput, requestFormatSelect].forEach(input => {
   input.addEventListener("input", renderRequestPreview);
@@ -800,5 +957,7 @@ document.addEventListener("keydown", event => {
 loadThinkingSelection();
 applySettingsToForm();
 loadModelOptions().then(loadGatewayConfig);
+updateSchoolLoginUi({});
+refreshSchoolLoginStatus(true);
 render();
 resizeTextarea();

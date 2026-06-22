@@ -8,7 +8,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from school_gpt_adapter import ask_school_gpt, list_school_gpt_models, MODEL_LABELS
+from school_gpt_adapter import (
+    ask_school_gpt,
+    close_school_gpt_login_session,
+    get_school_gpt_login_status,
+    list_school_gpt_models,
+    MODEL_LABELS,
+    save_school_gpt_login_session,
+    start_school_gpt_login_session,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -439,6 +447,55 @@ def list_thinking_options():
 @app.get("/v1/gateway-config")
 def get_gateway_config():
     return config_response(load_gateway_config())
+
+
+@app.get("/v1/school-login/status")
+def school_login_status(authorization: str = Header(default="")):
+    authenticate_user(authorization)
+    return {
+        "object": "school.login",
+        "data": get_school_gpt_login_status()
+    }
+
+
+@app.post("/v1/school-login/start")
+async def start_school_login(authorization: str = Header(default="")):
+    authenticate_user(authorization)
+
+    try:
+        status = await start_school_gpt_login_session()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "object": "school.login",
+        "data": status
+    }
+
+
+@app.post("/v1/school-login/save")
+async def save_school_login(authorization: str = Header(default="")):
+    authenticate_user(authorization)
+
+    try:
+        status = await save_school_gpt_login_session()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "object": "school.login",
+        "data": status
+    }
+
+
+@app.post("/v1/school-login/cancel")
+async def cancel_school_login(authorization: str = Header(default="")):
+    authenticate_user(authorization)
+    await close_school_gpt_login_session()
+    return {
+        "object": "school.login",
+        "data": get_school_gpt_login_status()
+    }
 
 
 @app.post("/v1/gateway-config")
