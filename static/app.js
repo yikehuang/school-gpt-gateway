@@ -685,7 +685,7 @@ function renderMathExpression(expression, displayMode) {
 
 function renderMessageContent(rawContent) {
   const source = normalizeSchoolMathDelimiters(rawContent);
-  const mathPattern = /(\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|\$[^\n$]+\$)/g;
+  const mathPattern = /(?:\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$\$[\s\S]+?\$\$|\$[^\n$]+\$)/g;
   let lastIndex = 0;
   let html = "";
 
