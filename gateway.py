@@ -139,7 +139,7 @@ USAGE_LOGS = []
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Any
 
 
 class ChatRequest(BaseModel):
@@ -153,6 +153,7 @@ class ChatRequest(BaseModel):
     reasoning_effort: Optional[str] = None
     reasoning: Optional[Dict[str, Any]] = None
     model: Optional[str] = None
+    images: Optional[List[Any]] = None
 
 
 class GatewayConfigRequest(BaseModel):
@@ -332,20 +333,99 @@ async def get_model_options() -> List[Dict[str, Any]]:
     return merge_model_options(CLIENT_MODEL_OPTIONS, BASE_MODEL_OPTIONS, LEGACY_MODEL_OPTIONS)
 
 
-def extract_question(request: ChatRequest) -> str:
+def coerce_image_input(value: Any) -> Optional[Dict[str, Any]]:
+    if not value:
+        return None
+
+    if isinstance(value, str):
+        return {"url": value}
+
+    if not isinstance(value, dict):
+        return None
+
+    if isinstance(value.get("image_url"), dict):
+        image = dict(value["image_url"])
+        if image.get("url"):
+            image.setdefault("detail", value.get("detail"))
+            return image
+
+    if isinstance(value.get("image_url"), str):
+        return {"url": value["image_url"], "detail": value.get("detail")}
+
+    for key in ("url", "data_url", "base64"):
+        if value.get(key):
+            return dict(value)
+
+    return None
+
+
+def extract_content_parts(content: Any) -> Tuple[str, List[Dict[str, Any]]]:
+    texts: List[str] = []
+    images: List[Dict[str, Any]] = []
+
+    if isinstance(content, str):
+        return content.strip(), images
+
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, str):
+                if item.strip():
+                    texts.append(item.strip())
+                continue
+
+            if not isinstance(item, dict):
+                continue
+
+            item_type = str(item.get("type") or "").lower()
+
+            if item_type in {"text", "input_text"} or item.get("text"):
+                text = str(item.get("text") or "").strip()
+                if text:
+                    texts.append(text)
+
+            if item_type in {"image_url", "input_image", "image"} or item.get("image_url"):
+                image = coerce_image_input(item)
+                if image:
+                    images.append(image)
+
+        return "\n".join(texts).strip(), images
+
+    if isinstance(content, dict):
+        text = str(content.get("text") or content.get("content") or "").strip()
+        image = coerce_image_input(content)
+        if image:
+            images.append(image)
+        return text, images
+
+    return "", images
+
+
+def extract_request_parts(request: ChatRequest) -> Tuple[str, List[Dict[str, Any]]]:
+    request_images = [
+        image for image in (coerce_image_input(item) for item in (request.images or [])) if image
+    ]
+
     if request.question and request.question.strip():
-        return request.question.strip()
+        return request.question.strip(), request_images
 
     if request.messages:
         for message in reversed(request.messages):
-            if message.role == "user" and message.content.strip():
-                return message.content.strip()
+            if message.role == "user":
+                text, images = extract_content_parts(message.content)
+                if text or images:
+                    return text, request_images + images
 
         for message in reversed(request.messages):
-            if message.content.strip():
-                return message.content.strip()
+            text, images = extract_content_parts(message.content)
+            if text or images:
+                return text, request_images + images
 
     raise HTTPException(status_code=400, detail="Question cannot be empty. Provide 'question' or 'messages'.")
+
+
+def extract_question(request: ChatRequest) -> str:
+    question, _ = extract_request_parts(request)
+    return question
 
 
 def authenticate_user(authorization: str) -> Dict[str, Any]:
@@ -361,7 +441,10 @@ def authenticate_user(authorization: str) -> Dict[str, Any]:
 
 
 async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[str, Any]:
-    question = extract_question(request)
+    question, images = extract_request_parts(request)
+    if not question and images:
+        question = "请描述这张图片。"
+
     gateway_config = load_gateway_config()
     client_model, requested_model, runtime_model = resolve_gateway_model(request.model, gateway_config)
     thinking = normalize_thinking(request, gateway_config.get("thinking"))
@@ -370,11 +453,11 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
     start_time = time.time()
 
     try:
-        answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking)
+        answer = await ask_school_gpt(question, model=runtime_model, thinking=thinking, images=images)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    input_tokens = estimate_tokens(question)
+    input_tokens = estimate_tokens(question) + len(images) * 256
     output_tokens = estimate_tokens(answer)
     total_tokens = input_tokens + output_tokens
     latency_ms = int((time.time() - start_time) * 1000)
@@ -391,6 +474,7 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
         "fallback_model_used": False,
         "question_length": len(question),
         "answer_length": len(answer),
+        "image_count": len(images),
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
@@ -410,6 +494,7 @@ async def run_gateway_chat(request: ChatRequest, user: Dict[str, Any]) -> Dict[s
         "fallback_model_used": False,
         "thinking": thinking,
         "thinking_name": get_thinking_name(thinking),
+        "image_count": len(images),
         "answer": answer,
         "usage": {
             "input_tokens": input_tokens,
@@ -552,6 +637,7 @@ async def chat_completions(
         "runtime_model": result["runtime_model"],
         "gateway_model_forced": result.get("gateway_model_forced", True),
         "fallback_model_used": result.get("fallback_model_used", False),
+        "image_count": result.get("image_count", 0),
         "thinking": result["thinking"],
         "reasoning_effort": result["thinking"],
         "thinking_name": result["thinking_name"],

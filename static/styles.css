@@ -479,6 +479,77 @@ button {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
 }
 
+.attach-button {
+  min-width: 48px;
+  height: 38px;
+  border: 0;
+  border-radius: 16px;
+  background: #f3f4f6;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.attach-button:hover {
+  color: var(--accent-dark);
+  background: #ecfdf5;
+}
+
+.image-preview-list {
+  max-width: 860px;
+  margin: 0 auto 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.image-preview-item,
+.message-image-item {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.image-preview-item {
+  width: 82px;
+  height: 82px;
+  border-radius: 14px;
+}
+
+.image-preview-item img,
+.message-image-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.remove-image-button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  color: #ffffff;
+  background: rgba(17, 24, 39, 0.75);
+  line-height: 1;
+}
+
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.message-image-item {
+  width: 148px;
+  height: 108px;
+  border-radius: 12px;
+}
+
 #promptInput {
   flex: 1;
   max-height: 180px;

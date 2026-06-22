@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>XJGPT</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260622-login-entry" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260622-vision" />
 </head>
 <body>
   <div class="app-shell">
@@ -80,7 +80,10 @@
       </section>
 
       <section class="composer-wrap">
+        <div class="image-preview-list" id="imagePreviewList" hidden></div>
         <form class="composer" id="chatForm">
+          <input id="imageInput" type="file" accept="image/*" multiple hidden />
+          <button id="attachImageButton" class="attach-button" type="button" aria-label="添加图片">＋图</button>
           <textarea id="promptInput" rows="1" placeholder="发送消息，Shift + Enter 换行"></textarea>
           <button id="sendButton" class="send-button" type="submit" aria-label="发送">↑</button>
         </form>
@@ -203,6 +206,6 @@
     </section>
   </div>
 
-  <script src="/static/app.js?v=20260622-login-entry"></script>
+  <script src="/static/app.js?v=20260622-vision"></script>
 </body>
 </html>

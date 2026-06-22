@@ -3,6 +3,9 @@ const welcomeCard = document.getElementById("welcomeCard");
 const chatForm = document.getElementById("chatForm");
 const promptInput = document.getElementById("promptInput");
 const sendButton = document.getElementById("sendButton");
+const attachImageButton = document.getElementById("attachImageButton");
+const imageInput = document.getElementById("imageInput");
+const imagePreviewList = document.getElementById("imagePreviewList");
 const newChatButton = document.getElementById("newChatButton");
 const conversationList = document.getElementById("conversationList");
 const modelSelect = document.getElementById("modelSelect");
@@ -39,6 +42,8 @@ const MODEL_STORAGE = "xjgpt-model";
 const THINKING_STORAGE = "xjgpt-thinking";
 const CLIENT_MODEL_ID = "default";
 const SCHOOL_LOGIN_URL = "https://xipuai.xjtlu.edu.cn/v3/chat";
+const MAX_IMAGE_COUNT = 5;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "",
@@ -64,6 +69,7 @@ let activeConversationId = conversations[0]?.id || createConversation().id;
 let isSending = false;
 let apiSettings = loadApiSettings();
 let schoolLoginSessionActive = false;
+let selectedImages = [];
 
 function setElementBusy(elements, busy) {
   elements.filter(Boolean).forEach(element => {
@@ -73,6 +79,101 @@ function setElementBusy(elements, busy) {
     element.classList.toggle("is-disabled", busy);
     element.setAttribute("aria-disabled", busy ? "true" : "false");
   });
+}
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`读取图片失败：${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addSelectedImages(files) {
+  const incoming = Array.from(files || []);
+
+  for (const file of incoming) {
+    if (!file.type.startsWith("image/")) {
+      alert(`只支持图片文件：${file.name}`);
+      continue;
+    }
+
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`图片过大：${file.name}。单张不能超过 8MB。`);
+      continue;
+    }
+
+    if (selectedImages.length >= MAX_IMAGE_COUNT) {
+      alert(`一次最多发送 ${MAX_IMAGE_COUNT} 张图片。`);
+      break;
+    }
+
+    const dataUrl = await readImageFile(file);
+    selectedImages.push({
+      id: crypto.randomUUID(),
+      name: file.name,
+      type: file.type || "image/png",
+      size: file.size,
+      dataUrl
+    });
+  }
+
+  renderImagePreviews();
+  renderRequestPreview();
+}
+
+function clearSelectedImages() {
+  selectedImages = [];
+  if (imageInput) {
+    imageInput.value = "";
+  }
+  renderImagePreviews();
+  renderRequestPreview();
+}
+
+function removeSelectedImage(id) {
+  selectedImages = selectedImages.filter(image => image.id !== id);
+  renderImagePreviews();
+  renderRequestPreview();
+}
+
+function renderImagePreviews() {
+  if (!imagePreviewList) return;
+
+  imagePreviewList.innerHTML = "";
+  imagePreviewList.hidden = selectedImages.length === 0;
+
+  selectedImages.forEach(image => {
+    const item = document.createElement("div");
+    item.className = "image-preview-item";
+
+    const img = document.createElement("img");
+    img.src = image.dataUrl;
+    img.alt = image.name;
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "remove-image-button";
+    removeButton.type = "button";
+    removeButton.textContent = "×";
+    removeButton.setAttribute("aria-label", `移除 ${image.name}`);
+    removeButton.addEventListener("click", () => removeSelectedImage(image.id));
+
+    item.appendChild(img);
+    item.appendChild(removeButton);
+    imagePreviewList.appendChild(item);
+  });
+}
+
+function toApiImage(image) {
+  return {
+    type: "image_url",
+    image_url: {
+      url: image.dataUrl
+    },
+    name: image.name,
+    mime_type: image.type
+  };
 }
 
 function loadApiSettings() {
@@ -516,17 +617,34 @@ function applyGatewayConfigFromForm() {
   }
 }
 
-function buildChatPayload(question, model, thinking = getSelectedThinking()) {
+function buildChatPayload(question, model, thinking = getSelectedThinking(), images = []) {
   const format = apiSettings.requestFormat || "messages";
   const clientModel = CLIENT_MODEL_ID;
+  const apiImages = images.map(toApiImage);
 
   if (format === "question") {
-    return {
+    const payload = {
       question,
       model: clientModel,
       thinking
     };
+
+    if (apiImages.length) {
+      payload.images = apiImages;
+    }
+
+    return payload;
   }
+
+  const content = apiImages.length
+    ? [
+        {
+          type: "text",
+          text: question || "请描述这张图片。"
+        },
+        ...apiImages
+      ]
+    : question;
 
   return {
     model: clientModel,
@@ -535,7 +653,7 @@ function buildChatPayload(question, model, thinking = getSelectedThinking()) {
     messages: [
       {
         role: "user",
-        content: question
+        content
       }
     ]
   };
@@ -548,7 +666,7 @@ function renderRequestPreview() {
   const previousSettings = apiSettings;
   apiSettings = { ...DEFAULT_SETTINGS, ...draftSettings };
 
-  const payload = buildChatPayload("请只回复两个字：成功", getConfiguredModel(), getConfiguredThinking());
+  const payload = buildChatPayload("请只回复两个字：成功", getConfiguredModel(), getConfiguredThinking(), []);
   const preview = {
     url: buildApiUrl(),
     method: "POST",
@@ -622,6 +740,26 @@ function createMessageNode(message) {
   content.textContent = message.content;
 
   contentWrap.appendChild(role);
+
+  if (Array.isArray(message.images) && message.images.length) {
+    const imageGrid = document.createElement("div");
+    imageGrid.className = "message-images";
+
+    message.images.forEach(image => {
+      const imageItem = document.createElement("div");
+      imageItem.className = "message-image-item";
+
+      const img = document.createElement("img");
+      img.src = image.dataUrl || image.url;
+      img.alt = image.name || "uploaded image";
+
+      imageItem.appendChild(img);
+      imageGrid.appendChild(imageItem);
+    });
+
+    contentWrap.appendChild(imageGrid);
+  }
+
   contentWrap.appendChild(content);
 
   if (message.meta) {
@@ -706,7 +844,7 @@ function parseUsage(data) {
   return { total, prompt, completion };
 }
 
-async function callConfiguredApi(question, model, thinking = getSelectedThinking()) {
+async function callConfiguredApi(question, model, thinking = getSelectedThinking(), images = []) {
   const apiKey = getApiKeyOrThrow();
 
   const response = await fetch(buildApiUrl(), {
@@ -715,7 +853,7 @@ async function callConfiguredApi(question, model, thinking = getSelectedThinking
       "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(buildChatPayload(question, model, thinking))
+    body: JSON.stringify(buildChatPayload(question, model, thinking, images))
   });
 
   const data = await response.json().catch(() => ({}));
@@ -728,37 +866,40 @@ async function callConfiguredApi(question, model, thinking = getSelectedThinking
   return data;
 }
 
-async function sendMessage(question) {
+async function sendMessage(question, images = []) {
   const model = modelSelect.value;
   const modelName = getSelectedModelName();
   const thinking = getSelectedThinking();
   const thinkingName = getSelectedThinkingName();
+  const displayQuestion = question || "请描述这张图片。";
 
   const conversation = getActiveConversation();
   conversation.messages.push({
     role: "user",
-    content: question,
+    content: displayQuestion,
+    images,
     meta: {
       model: modelName,
       thinking: thinkingName,
+      images: images.length,
       endpoint: apiSettings.chatEndpoint
     }
   });
 
   if (conversation.title === "新的会话") {
-    conversation.title = question.slice(0, 28) || "新的会话";
+    conversation.title = question.slice(0, 28) || (images.length ? "图片消息" : "新的会话");
   }
 
   saveConversations();
   render();
-  addTypingMessage(`${modelName} / ${thinkingName}`);
+  addTypingMessage(`${modelName} / ${thinkingName}${images.length ? ` / ${images.length} 图` : ""}`);
 
   isSending = true;
   sendButton.disabled = true;
   setStatus(`Asking ${modelName}`, "loading");
 
   try {
-    const data = await callConfiguredApi(question, model, thinking);
+    const data = await callConfiguredApi(displayQuestion, model, thinking, images);
     const answer = parseAssistantAnswer(data);
     const usage = parseUsage(data);
     removeTypingMessage();
@@ -770,6 +911,7 @@ async function sendMessage(question) {
         model: data.model_name || data.model || modelName,
         runtime: data.runtime_model || data.model || "-",
         thinking: data.thinking_name || data.thinking || thinkingName,
+        images: data.image_count ?? images.length,
         tokens: usage.total,
         latency: `${data.latency_ms ?? "-"}ms`
       }
@@ -901,11 +1043,13 @@ chatForm.addEventListener("submit", event => {
   if (isSending) return;
 
   const question = promptInput.value.trim();
-  if (!question) return;
+  const images = selectedImages.map(image => ({ ...image }));
+  if (!question && images.length === 0) return;
 
   promptInput.value = "";
+  clearSelectedImages();
   resizeTextarea();
-  sendMessage(question);
+  sendMessage(question, images);
 });
 
 promptInput.addEventListener("input", resizeTextarea);
@@ -919,6 +1063,7 @@ promptInput.addEventListener("keydown", event => {
 newChatButton.addEventListener("click", () => {
   const conversation = createConversation();
   activeConversationId = conversation.id;
+  clearSelectedImages();
   render();
   promptInput.focus();
 });
@@ -938,6 +1083,8 @@ schoolLoginButton.addEventListener("click", handleSchoolLoginShortcut);
 openSchoolLoginButton.addEventListener("click", startSchoolLogin);
 saveSchoolLoginButton.addEventListener("click", saveSchoolLogin);
 cancelSchoolLoginButton.addEventListener("click", cancelSchoolLogin);
+attachImageButton.addEventListener("click", () => imageInput.click());
+imageInput.addEventListener("change", () => addSelectedImages(imageInput.files));
 
 [apiBaseUrlInput, apiEndpointSelect, apiKeyInput, requestFormatSelect].forEach(input => {
   input.addEventListener("input", renderRequestPreview);

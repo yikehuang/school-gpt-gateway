@@ -1,7 +1,11 @@
 import asyncio
+import base64
 import json
+import mimetypes
 import re
+import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 import httpx
@@ -17,8 +21,12 @@ CHAT_CONFIG_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/config?lang=en&sf_reque
 CHAT_SESSION_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/session?lang=en&sf_request_type=ajax"
 CHAT_COMPLETIONS_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/completions?sf_request_type=fetch"
 CHAT_SAVE_SESSION_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/chat/saveSession?sf_request_type=ajax"
+CHAT_UPLOAD_URL = f"{SCHOOL_GPT_BASE_URL}/jmapi/api/common/upload"
 
 HTTP_TIMEOUT = httpx.Timeout(90.0, connect=20.0, read=90.0)
+IMAGE_DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, connect=10.0, read=30.0)
+MAX_IMAGE_COUNT = 5
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
 LOGIN_SESSION: dict[str, Any] = {}
 
 # 前端和 API 可传入这些 model id。label 必须尽量匹配学校网页下拉框里的文字。
@@ -33,10 +41,12 @@ MODEL_LABELS = {
 
 DIRECT_MODEL_CANDIDATES = {
     "gpt-5.4": ["gpt-5.4", "GPT-5.4"],
+    "model-router": ["model-router", "GPT-Model-Router"],
     "deepseek-r1": ["deepseek-r1", "DeepSeek-R1", "DeepseekR1联网"],
     "deepseek-v3": ["deepseek-v3", "DeepSeek-V3", "DeepSeek-V3.1-W8A8"],
     "qwen-max": ["qwen-max", "Qwen-Max"],
 }
+VISION_MODEL_CANDIDATES = ["model-router", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5"]
 
 # XipuAI 聊天输入框候选选择器。
 # 如果学校页面更新，可以运行：playwright codegen https://xipuai.xjtlu.edu.cn/v3/chat
@@ -182,6 +192,21 @@ def _build_direct_client(state: dict[str, Any]) -> httpx.AsyncClient:
     )
 
 
+def _build_upload_client(state: dict[str, Any]) -> httpx.AsyncClient:
+    token = _extract_jm_token(state)
+    headers = _build_direct_headers(token)
+    headers.pop("content-type", None)
+    headers.pop("jm-token", None)
+    headers["Jm-Token"] = token
+
+    return httpx.AsyncClient(
+        cookies=_build_direct_cookies(state),
+        headers=headers,
+        timeout=HTTP_TIMEOUT,
+        trust_env=False,
+    )
+
+
 def get_school_gpt_login_status() -> dict[str, Any]:
     state_exists = SCHOOL_GPT_STATE_FILE.exists()
     updated_at = int(SCHOOL_GPT_STATE_FILE.stat().st_mtime) if state_exists else None
@@ -318,6 +343,163 @@ def _format_model_option(option: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _is_truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _is_school_file_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return host.endswith("tosai.xjtlu.edu.cn") or host.endswith("xipuai.xjtlu.edu.cn")
+
+
+def _guess_extension(mime_type: str | None) -> str:
+    if not mime_type:
+        return ".png"
+
+    extension = mimetypes.guess_extension(mime_type.split(";")[0].strip())
+    return extension or ".png"
+
+
+def _decode_data_url(data_url: str) -> tuple[bytes, str]:
+    match = re.match(r"^data:(?P<mime>[^;,]+)?;base64,(?P<data>.+)$", data_url, flags=re.I | re.S)
+    if not match:
+        raise DirectAdapterError("图片 data URL 格式不正确，应为 data:image/...;base64,...")
+
+    mime_type = match.group("mime") or "image/png"
+    raw_data = re.sub(r"\s+", "", match.group("data") or "")
+
+    try:
+        content = base64.b64decode(raw_data, validate=True)
+    except Exception as exc:
+        raise DirectAdapterError("图片 base64 解码失败。") from exc
+
+    return content, mime_type
+
+
+def _decode_base64_image(raw_data: str, mime_type: str | None = None) -> tuple[bytes, str]:
+    try:
+        content = base64.b64decode(re.sub(r"\s+", "", raw_data), validate=True)
+    except Exception as exc:
+        raise DirectAdapterError("图片 base64 解码失败。") from exc
+
+    return content, mime_type or "image/png"
+
+
+def _coerce_image_payload(image: Any) -> dict[str, Any]:
+    if isinstance(image, str):
+        return {"url": image}
+
+    if not isinstance(image, dict):
+        raise DirectAdapterError("图片输入格式不支持，请传 URL、data URL 或 image_url 对象。")
+
+    payload = dict(image)
+    image_url = payload.get("image_url")
+
+    if isinstance(image_url, dict):
+        payload.setdefault("url", image_url.get("url"))
+        payload.setdefault("mime_type", image_url.get("mime_type") or image_url.get("mime"))
+    elif isinstance(image_url, str):
+        payload.setdefault("url", image_url)
+
+    if payload.get("data_url") and not payload.get("url"):
+        payload["url"] = payload["data_url"]
+
+    return payload
+
+
+async def _download_image(url: str) -> tuple[bytes, str]:
+    async with httpx.AsyncClient(
+        timeout=IMAGE_DOWNLOAD_TIMEOUT,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
+        response = await client.get(url)
+
+    if response.status_code >= 400:
+        raise DirectAdapterError(f"下载远程图片失败，HTTP {response.status_code}。")
+
+    mime_type = response.headers.get("content-type", "image/png").split(";")[0].strip()
+    if not mime_type.startswith("image/"):
+        raise DirectAdapterError(f"远程 URL 不是图片内容：{mime_type}")
+
+    return response.content, mime_type
+
+
+async def _upload_image_bytes(
+    client: httpx.AsyncClient,
+    content: bytes,
+    mime_type: str,
+    filename: str | None = None,
+) -> str:
+    if len(content) > MAX_IMAGE_BYTES:
+        limit_mb = MAX_IMAGE_BYTES // (1024 * 1024)
+        raise DirectAdapterError(f"单张图片不能超过 {limit_mb}MB。")
+
+    safe_filename = filename or f"xjgpt-{uuid.uuid4().hex}{_guess_extension(mime_type)}"
+    response = await client.post(
+        CHAT_UPLOAD_URL,
+        data={"dirname": "gallery", "lang": "en"},
+        files={"file": (safe_filename, content, mime_type)},
+    )
+
+    if response.status_code != 200:
+        raise DirectAdapterError(f"上传图片到 XipuAI 失败，HTTP {response.status_code}。")
+
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise DirectAdapterError("XipuAI 图片上传接口返回了无法解析的 JSON。") from exc
+
+    data = _ensure_backend_success(payload, "上传图片")
+
+    if not isinstance(data, dict) or not data.get("file_url"):
+        raise DirectAdapterError("XipuAI 图片上传成功但没有返回 file_url。")
+
+    return str(data["file_url"])
+
+
+async def upload_school_gpt_images(images: list[Any] | None) -> list[str]:
+    if not images:
+        return []
+
+    if len(images) > MAX_IMAGE_COUNT:
+        raise DirectAdapterError(f"一次最多支持 {MAX_IMAGE_COUNT} 张图片。")
+
+    state = _load_storage_state()
+    uploaded_urls: list[str] = []
+
+    async with _build_upload_client(state) as upload_client:
+        for index, image in enumerate(images, start=1):
+            payload = _coerce_image_payload(image)
+            url = str(payload.get("url") or "").strip()
+            filename = payload.get("name") or payload.get("filename") or f"xjgpt-image-{index}.png"
+
+            if url.startswith("data:"):
+                content, mime_type = _decode_data_url(url)
+                uploaded_urls.append(await _upload_image_bytes(upload_client, content, mime_type, filename))
+                continue
+
+            if payload.get("base64"):
+                content, mime_type = _decode_base64_image(str(payload["base64"]), payload.get("mime_type"))
+                uploaded_urls.append(await _upload_image_bytes(upload_client, content, mime_type, filename))
+                continue
+
+            if url.startswith("http://") or url.startswith("https://"):
+                if _is_school_file_url(url):
+                    uploaded_urls.append(url)
+                    continue
+
+                content, mime_type = await _download_image(url)
+                uploaded_urls.append(await _upload_image_bytes(upload_client, content, mime_type, filename))
+                continue
+
+            raise DirectAdapterError("图片必须是 http(s) URL、学校上传 URL、data URL 或 base64。")
+
+    return uploaded_urls
+
+
 async def list_school_gpt_models() -> list[dict[str, Any]]:
     """Return all XipuAI models visible to the saved school login state."""
     state = _load_storage_state()
@@ -382,32 +564,67 @@ async def _get_available_models(client: httpx.AsyncClient) -> list[dict[str, Any
     return [model for model in models if isinstance(model, dict)]
 
 
-async def _resolve_direct_model(client: httpx.AsyncClient, model: str | None) -> str | None:
-    model_id = (model or "auto").strip()
-
-    if model_id == "auto":
-        return None
-
-    candidates = DIRECT_MODEL_CANDIDATES.get(model_id, [model_id, get_model_label(model_id) or model_id])
+def _model_matches(option: dict[str, Any], candidates: list[str]) -> bool:
     normalized_candidates = [candidate.lower() for candidate in candidates if candidate]
+    value = str(option.get("value") or "")
+    label = str(option.get("label") or "")
+
+    if value.lower() in normalized_candidates or label.lower() in normalized_candidates:
+        return True
+
+    return any(candidate in value.lower() or candidate in label.lower() for candidate in normalized_candidates)
+
+
+def _find_model_option(models: list[dict[str, Any]], model_id: str) -> dict[str, Any] | None:
+    candidates = DIRECT_MODEL_CANDIDATES.get(model_id, [model_id, get_model_label(model_id) or model_id])
+
+    for option in models:
+        if _model_matches(option, candidates):
+            return option
+
+    return None
+
+
+def _find_vision_model(models: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for model_id in VISION_MODEL_CANDIDATES:
+        option = _find_model_option(models, model_id)
+        if option and _is_truthy_flag(option.get("multimodal")):
+            return option
+
+    for option in models:
+        if _is_truthy_flag(option.get("multimodal")):
+            return option
+
+    return None
+
+
+async def _resolve_direct_model(
+    client: httpx.AsyncClient,
+    model: str | None,
+    require_multimodal: bool = False,
+) -> str | None:
+    model_id = (model or "auto").strip()
     models = await _get_available_models(client)
 
-    for option in models:
-        value = str(option.get("value") or "")
-        label = str(option.get("label") or "")
+    if model_id == "auto" and not require_multimodal:
+        return None
 
-        if value.lower() in normalized_candidates:
-            return value
+    if model_id == "auto" and require_multimodal:
+        vision_model = _find_vision_model(models)
+        if vision_model:
+            return str(vision_model.get("value") or "")
+        raise DirectBackendError("XipuAI 当前没有可用的多模态模型，无法识别图片。")
 
-        if label.lower() in normalized_candidates:
-            return value
+    option = _find_model_option(models, model_id)
 
-    for option in models:
-        value = str(option.get("value") or "")
-        label = str(option.get("label") or "")
+    if option:
+        if require_multimodal and not _is_truthy_flag(option.get("multimodal")):
+            vision_model = _find_vision_model(models)
+            if vision_model:
+                return str(vision_model.get("value") or "")
+            raise DirectBackendError(f"模型 {model_id} 不支持图片，且没有可用多模态模型可切换。")
 
-        if any(candidate in value.lower() or candidate in label.lower() for candidate in normalized_candidates):
-            return value
+        return str(option.get("value") or "")
 
     available = ", ".join(str(option.get("label") or option.get("value")) for option in models[:12])
     raise DirectBackendError(
@@ -463,10 +680,11 @@ async def _post_direct_completion(
     question: str,
     session_id: int,
     thinking: str = "minimal",
+    files: list[str] | None = None,
 ) -> str:
     payload = {
         "text": question,
-        "files": [],
+        "files": files or [],
         "online": 0,
         "thinking": thinking,
         "sessionId": session_id,
@@ -516,6 +734,7 @@ async def ask_school_gpt_direct(
     question: str,
     model: str | None = "auto",
     thinking: str = "minimal",
+    images: list[Any] | None = None,
 ) -> str:
     """
     使用保存下来的学校登录态，直接请求 XipuAI 后台接口。
@@ -523,14 +742,22 @@ async def ask_school_gpt_direct(
     该路径只复用用户本人手动登录后保存的 cookie 和 jm-token，不绕过学校认证。
     """
     state = _load_storage_state()
+    uploaded_files = await upload_school_gpt_images(images)
+    require_multimodal = bool(uploaded_files)
 
     for attempt in range(3):
         try:
             async with _build_direct_client(state) as client:
                 session = await _get_latest_session(client)
-                model_value = await _resolve_direct_model(client, model)
+                model_value = await _resolve_direct_model(client, model, require_multimodal=require_multimodal)
                 await _set_session_model_if_needed(client, session, model_value)
-                return await _post_direct_completion(client, question, int(session["id"]), thinking=thinking)
+                return await _post_direct_completion(
+                    client,
+                    question,
+                    int(session["id"]),
+                    thinking=thinking,
+                    files=uploaded_files,
+                )
         except DirectBackendError as exc:
             if _is_rate_limit_error(exc) and attempt < 2:
                 await asyncio.sleep(2 + attempt * 3)
@@ -735,6 +962,7 @@ async def ask_school_gpt_browser(
     question: str,
     model: str | None = "auto",
     thinking: str = "minimal",
+    images: list[Any] | None = None,
 ) -> str:
     """
     使用学校授权的 XipuAI 网页作为上游服务。
@@ -745,6 +973,9 @@ async def ask_school_gpt_browser(
     - 程序不读取他人 Cookie；
     - 日志只记录问题长度、回答长度和模型 id，不保存真实对话原文。
     """
+    if images:
+        raise DirectAdapterError("图片识别需要使用 XipuAI 后台直连上传接口，浏览器兜底模式暂不支持图片。")
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
 
@@ -789,10 +1020,13 @@ async def ask_school_gpt(
     question: str,
     model: str | None = "auto",
     thinking: str = "minimal",
+    images: list[Any] | None = None,
 ) -> str:
     try:
-        return await ask_school_gpt_direct(question, model=model, thinking=thinking)
+        return await ask_school_gpt_direct(question, model=model, thinking=thinking, images=images)
     except DirectBackendError:
         raise
     except DirectAdapterError:
+        if images:
+            raise
         return await ask_school_gpt_browser(question, model=model, thinking=thinking)
