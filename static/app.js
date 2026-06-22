@@ -38,6 +38,7 @@ const SETTINGS_STORAGE = "xjgpt-api-settings";
 const MODEL_STORAGE = "xjgpt-model";
 const THINKING_STORAGE = "xjgpt-thinking";
 const CLIENT_MODEL_ID = "default";
+const SCHOOL_LOGIN_URL = "https://xipuai.xjtlu.edu.cn/v3/chat";
 
 const DEFAULT_SETTINGS = {
   apiBaseUrl: "",
@@ -63,6 +64,16 @@ let activeConversationId = conversations[0]?.id || createConversation().id;
 let isSending = false;
 let apiSettings = loadApiSettings();
 let schoolLoginSessionActive = false;
+
+function setElementBusy(elements, busy) {
+  elements.filter(Boolean).forEach(element => {
+    if ("disabled" in element) {
+      element.disabled = busy;
+    }
+    element.classList.toggle("is-disabled", busy);
+    element.setAttribute("aria-disabled", busy ? "true" : "false");
+  });
+}
 
 function loadApiSettings() {
   try {
@@ -259,7 +270,11 @@ function updateSchoolLoginUi(status) {
   }
 
   if (schoolLoginButton) {
-    schoolLoginButton.textContent = schoolLoginSessionActive ? "保存登录态" : loggedIn ? "学校AI已登录" : "登录学校AI";
+    schoolLoginButton.textContent = schoolLoginSessionActive ? "保存登录态" : loggedIn ? "重新登录学校AI" : "登录学校AI";
+    schoolLoginButton.href = data.url || SCHOOL_LOGIN_URL;
+    schoolLoginButton.title = schoolLoginSessionActive
+      ? "点击保存弹出浏览器中的学校 AI 登录态"
+      : "点击打开由中转站控制的学校 AI 登录窗口";
     schoolLoginButton.classList.toggle("logged-in", loggedIn && !schoolLoginSessionActive);
   }
 
@@ -305,7 +320,7 @@ async function refreshSchoolLoginStatus(silent = false) {
 
 async function startSchoolLogin() {
   const buttons = [schoolLoginButton, openSchoolLoginButton].filter(Boolean);
-  buttons.forEach(button => { button.disabled = true; });
+  setElementBusy(buttons, true);
   setStatus("Opening school login", "loading");
 
   try {
@@ -314,15 +329,16 @@ async function startSchoolLogin() {
     alert("学校 AI 登录窗口已打开。请在弹出的浏览器里完成登录，然后回到 XJGPT 点击“保存登录态”。");
   } catch (error) {
     setStatus("Login open failed", "error");
-    alert(`打开学校 AI 登录失败：${error.message}`);
+    window.open(SCHOOL_LOGIN_URL, "_blank", "noopener");
+    alert(`打开中转站登录窗口失败：${error.message}\n\n我已经尝试直接打开学校网页作为备用入口。注意：要让中转站保存登录态，仍需要使用“打开登录窗口”弹出的浏览器完成登录。`);
   } finally {
-    buttons.forEach(button => { button.disabled = false; });
+    setElementBusy(buttons, false);
   }
 }
 
 async function saveSchoolLogin() {
   const buttons = [schoolLoginButton, saveSchoolLoginButton].filter(Boolean);
-  buttons.forEach(button => { button.disabled = true; });
+  setElementBusy(buttons, true);
   setStatus("Saving school login", "loading");
 
   try {
@@ -335,14 +351,14 @@ async function saveSchoolLogin() {
     setStatus("Login save failed", "error");
     alert(`保存学校 AI 登录态失败：${error.message}`);
   } finally {
-    buttons.forEach(button => { button.disabled = false; });
+    setElementBusy(buttons, false);
     await refreshSchoolLoginStatus(true);
   }
 }
 
 async function cancelSchoolLogin() {
   const buttons = [cancelSchoolLoginButton, schoolLoginButton].filter(Boolean);
-  buttons.forEach(button => { button.disabled = true; });
+  setElementBusy(buttons, true);
   setStatus("Closing login window", "loading");
 
   try {
@@ -352,11 +368,15 @@ async function cancelSchoolLogin() {
     setStatus("Cancel failed", "error");
     alert(`关闭登录窗口失败：${error.message}`);
   } finally {
-    buttons.forEach(button => { button.disabled = false; });
+    setElementBusy(buttons, false);
   }
 }
 
-async function handleSchoolLoginShortcut() {
+async function handleSchoolLoginShortcut(event) {
+  if (event) {
+    event.preventDefault();
+  }
+
   if (schoolLoginSessionActive) {
     await saveSchoolLogin();
   } else {

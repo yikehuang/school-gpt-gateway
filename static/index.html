@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>XJGPT</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260622-login-entry" />
 </head>
 <body>
   <div class="app-shell">
@@ -59,7 +59,7 @@
               <option value="high">深度分析</option>
             </select>
           </label>
-          <button class="secondary-button school-login-button" id="schoolLoginButton" type="button">登录学校AI</button>
+          <a class="secondary-button school-login-button" id="schoolLoginButton" href="https://xipuai.xjtlu.edu.cn/v3/chat" target="_blank" rel="noopener">登录学校AI</a>
           <button class="secondary-button" id="topSettingsButton" type="button">设置</button>
           <div class="status-pill" id="statusPill">Ready</div>
         </div>
@@ -141,6 +141,7 @@
             <button class="secondary-button" id="openSchoolLoginButton" type="button">打开登录窗口</button>
             <button class="primary-button" id="saveSchoolLoginButton" type="button">保存登录态</button>
             <button class="secondary-button" id="cancelSchoolLoginButton" type="button">取消登录窗口</button>
+            <a class="secondary-button direct-login-link" href="https://xipuai.xjtlu.edu.cn/v3/chat" target="_blank" rel="noopener">直接打开学校网页</a>
           </div>
         </div>
       </section>
@@ -202,6 +203,6 @@
     </section>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260622-login-entry"></script>
 </body>
 </html>
